@@ -188,14 +188,15 @@ tr:hover td { background: var(--surface2); }
     <h2>🔑 API-ключ OpenRouter</h2>
     <p>OpenRouter — <strong>бесплатно</strong>, без карты. До 50 запросов в день.<br><br>
     <strong>Как получить:</strong><br>
-    1. Зайдите на <a href="https://openrouter.ai" target="_blank">openrouter.ai</a><br>
-    2. Нажмите «Sign In» → войдите через Google<br>
-    3. Перейдите в «Keys» → «Create Key»<br>
-    4. Скопируйте ключ и вставьте ниже<br><br>
+    1. Зайдите на <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a><br>
+    2. Войдите через Google → нажмите <strong>«Create Key»</strong><br>
+    3. Скопируйте ключ целиком и вставьте ниже<br><br>
     Ключ хранится только в вашем браузере.</p>
-    <input type="password" id="api-input" placeholder="sk-or-v1-...">
+    <input type="password" id="api-input" placeholder="Вставьте ключ сюда...">
+    <div id="key-preview" style="font-size:11px;color:var(--text3);margin-bottom:10px;font-family:var(--mono);word-break:break-all"></div>
     <div class="modal-row">
       <button class="btn primary" onclick="saveKey()" style="flex:1">Сохранить и продолжить</button>
+      <button class="btn" onclick="clearKey()">Сбросить</button>
       <button class="btn" onclick="closeModal()">Отмена</button>
     </div>
   </div>
@@ -536,11 +537,29 @@ const EXP_PAGE = 20;
 function getKey() { return localStorage.getItem('sen_apikey') || ''; }
 function saveKey() {
   const v = document.getElementById('api-input').value.trim();
-  if (!v.startsWith('sk-or')) { alert('Ключ OpenRouter начинается с sk-or-v1-...'); return; }
+  if (!v) { alert('Введите API-ключ'); return; }
+  if (v.length < 20) { alert('Ключ слишком короткий — проверьте что скопировали полностью'); return; }
   localStorage.setItem('sen_apikey', v);
   updateApiStatus();
   closeModal();
 }
+function clearKey() {
+  localStorage.removeItem('sen_apikey');
+  document.getElementById('api-input').value = '';
+  document.getElementById('key-preview').textContent = '';
+  updateApiStatus();
+  alert('Ключ удалён. Введите новый ключ.');
+}
+// Show key preview as user types
+document.addEventListener('DOMContentLoaded', () => {
+  const inp = document.getElementById('api-input');
+  if (inp) inp.addEventListener('input', () => {
+    const v = inp.value.trim();
+    const prev = document.getElementById('key-preview');
+    if (v.length > 8) prev.textContent = v.slice(0,8) + '...' + v.slice(-4) + ` (${v.length} симв.)`;
+    else prev.textContent = '';
+  });
+});
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
 function updateApiStatus() {
   const k = getKey();
@@ -776,13 +795,6 @@ async function fillWithAI() {
       },
       body: JSON.stringify({
         model: 'meta-llama/llama-3.3-70b-instruct:free',
-        models: [
-          'meta-llama/llama-3.3-70b-instruct:free',
-          'qwen/qwen3-235b-a22b:free',
-          'mistralai/mistral-small-3.1-24b-instruct:free',
-          'openrouter/free'
-        ],
-        route: 'fallback',
         max_tokens: 2000,
         messages: [
           { role: 'system', content: buildSystemPrompt() },
@@ -790,6 +802,16 @@ async function fillWithAI() {
         ]
       })
     });
+
+    // Show raw status for debugging
+    if (!resp.ok) {
+      let errBody = '';
+      try { errBody = JSON.stringify(await resp.json()); } catch(e) { errBody = await resp.text(); }
+      showSt('ai-status','err', `Ошибка ${resp.status}: ${errBody}`);
+      btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+      return;
+    }
+
     const data = await resp.json();
     const text = data.choices?.[0]?.message?.content || '';
     if (text) {
@@ -805,8 +827,7 @@ async function fillWithAI() {
       document.getElementById('score-row').style.display = 'grid';
       showSt('ai-status','ok',`✓ Готово! Заполнено ${filled} из ${blanks} полей (${pct}%)`);
     } else {
-      const errMsg = data.error?.message || JSON.stringify(data);
-      showSt('ai-status','err','Ошибка: ' + errMsg);
+      showSt('ai-status','err','Пустой ответ от модели. Попробуйте ещё раз. Детали: ' + JSON.stringify(data));
     }
   } catch(e) { showSt('ai-status','err','Ошибка соединения: '+e.message); }
   btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
