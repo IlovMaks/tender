@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+с<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root {
   --bg: #f5f4f0;
@@ -398,10 +398,10 @@ tr:hover td { background: var(--surface2); }
              ondragover="event.preventDefault();this.classList.add('drag-over')"
              ondragleave="this.classList.remove('drag-over')"
              ondrop="handleDrop(event)">
-          <input type="file" accept=".docx,.doc,.pdf,.txt,.xlsx,.xls" onchange="handleFileInput(this)">
+          <input type="file" accept=".docx,.xlsx,.xls" onchange="handleFileInput(this)">
           <div class="uz-icon">📄</div>
           <div class="uz-title">Перетащите файл или нажмите для выбора</div>
-          <div class="uz-sub">Поддерживаются форматы: DOCX, PDF, XLSX, XLS, TXT</div>
+          <div class="uz-sub">Поддерживаются форматы: DOCX (Word), XLSX / XLS (Excel)</div>
         </div>
         <div id="file-badge-wrap" style="display:none">
           <div class="file-badge">
@@ -426,10 +426,21 @@ tr:hover td { background: var(--surface2); }
       <div id="ai-status"></div>
 
       <div id="result-section" style="display:none;margin-top:20px">
-        <div class="section-label">Готовая заполненная анкета</div>
-        <div class="result-wrap">
-          <textarea id="result-text" readonly></textarea>
-          <button class="copy-abs" onclick="copyResult()">Копировать</button>
+        <div class="section-label">Результат</div>
+        <div id="result-file-section" style="display:none">
+          <div style="background:var(--ok-bg);border:1px solid #b5d4be;border-radius:var(--radius-lg);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+            <div>
+              <div style="font-size:14px;font-weight:600;color:var(--ok)">✓ Файл заполнен и готов к скачиванию</div>
+              <div style="font-size:12px;color:var(--text2);margin-top:3px" id="result-file-info"></div>
+            </div>
+            <button class="btn primary" onclick="downloadFilledFile()" id="download-btn" style="white-space:nowrap;flex-shrink:0">⬇ Скачать файл</button>
+          </div>
+        </div>
+        <div id="result-text-section" style="display:none">
+          <div class="result-wrap">
+            <textarea id="result-text" readonly></textarea>
+            <button class="copy-abs" onclick="copyResult()">Копировать</button>
+          </div>
         </div>
       </div>
     </div>
@@ -769,11 +780,11 @@ async function fillWithAI() {
   const key = getKey();
   if (!key) { document.getElementById('modal').style.display='flex'; return; }
 
-  // Determine text source
   let q = '';
-  if (currentSource === 'file') {
+  const isFile = currentSource === 'file' && currentFile;
+  if (isFile) {
     q = extractedText;
-    if (!q) { showSt('ai-status','warn','Загрузите файл анкеты или переключитесь на ввод текста'); return; }
+    if (!q) { showSt('ai-status','warn','Загрузите файл анкеты'); return; }
   } else {
     q = g('questionnaire');
     if (!q) { showSt('ai-status','warn','Вставьте текст анкеты заказчика'); return; }
@@ -784,6 +795,14 @@ async function fillWithAI() {
   document.getElementById('ai-status').innerHTML = '<div class="status loading">ИИ анализирует анкету...</div>';
   document.getElementById('result-section').style.display = 'none';
   document.getElementById('score-row').style.display = 'none';
+  filledFileBlob = null;
+
+  // Build prompt: if file mode — ask for JSON pairs; if text mode — ask for filled text
+  const systemPrompt = buildSystemPrompt();
+  const userPrompt = isFile
+    ? `Проанализируй анкету заказчика и верни ТОЛЬКО валидный JSON объект (без пояснений, без markdown, без \`\`\`), где ключи — это названия полей/вопросов из анкеты, а значения — данные из базы компании. Если данных нет — значение "[ТРЕБУЕТ УТОЧНЕНИЯ]". Пример: {"Полное наименование": "ООО ...", "ИНН": "7736557940"}\n\nАНКЕТА:\n${q}`
+    : `Заполни анкету данными из базы. Сохраняй структуру. Если данных нет — [ТРЕБУЕТ УТОЧНЕНИЯ].\n\nАНКЕТА:\n${q}`;
+
   try {
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -795,15 +814,14 @@ async function fillWithAI() {
       },
       body: JSON.stringify({
         model: 'openrouter/auto',
-        max_tokens: 2000,
+        max_tokens: 3000,
         messages: [
-          { role: 'system', content: buildSystemPrompt() },
-          { role: 'user', content: `Заполни анкету:\n\n${q}` }
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
         ]
       })
     });
 
-    // Show raw status for debugging
     if (!resp.ok) {
       let errBody = '';
       try { errBody = JSON.stringify(await resp.json()); } catch(e) { errBody = await resp.text(); }
@@ -813,24 +831,77 @@ async function fillWithAI() {
     }
 
     const data = await resp.json();
-    const text = data.choices?.[0]?.message?.content || '';
-    if (text) {
-      document.getElementById('result-text').value = text;
-      document.getElementById('result-section').style.display = 'block';
-      const blanks = (q.match(/_{3,}/g)||[]).length;
-      const unclear = (text.match(/\[ТРЕБУЕТ УТОЧНЕНИЯ\]/g)||[]).length;
-      const filled = blanks - unclear;
-      const pct = blanks ? Math.round(filled/blanks*100) : 0;
-      document.getElementById('sc-filled').textContent = `${filled} (${pct}%)`;
-      document.getElementById('sc-unclear').textContent = unclear;
-      document.getElementById('sc-total').textContent = blanks;
-      document.getElementById('score-row').style.display = 'grid';
-      showSt('ai-status','ok',`✓ Готово! Заполнено ${filled} из ${blanks} полей (${pct}%)`);
-    } else {
-      showSt('ai-status','err','Пустой ответ от модели. Попробуйте ещё раз. Детали: ' + JSON.stringify(data));
+    const aiText = data.choices?.[0]?.message?.content || '';
+
+    if (!aiText) {
+      showSt('ai-status','err','Пустой ответ от модели. Попробуйте ещё раз.');
+      btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+      return;
     }
+
+    if (isFile) {
+      // Parse JSON pairs from AI
+      let pairs = {};
+      try {
+        const clean = aiText.replace(/```json|```/g,'').trim();
+        pairs = JSON.parse(clean);
+      } catch(e) {
+        // If JSON failed, fallback to text mode
+        showResultText(aiText, q);
+        showSt('ai-status','warn','Не удалось разобрать JSON — показан текстовый результат. Скопируйте вручную.');
+        btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+        return;
+      }
+
+      // Produce filled file
+      document.getElementById('ai-status').innerHTML = '<div class="status loading">Вставляю данные в файл...</div>';
+      try {
+        if (currentFileExt === 'docx') {
+          filledFileBlob = await produceFilledDocx(pairs);
+        } else {
+          filledFileBlob = await produceFilledXlsx({...pairs});
+        }
+        const filled = Object.values(pairs).filter(v => v && v !== '[ТРЕБУЕТ УТОЧНЕНИЯ]').length;
+        const unclear = Object.values(pairs).filter(v => v === '[ТРЕБУЕТ УТОЧНЕНИЯ]').length;
+        const total = Object.keys(pairs).length;
+
+        document.getElementById('sc-filled').textContent = `${filled} (${total ? Math.round(filled/total*100) : 0}%)`;
+        document.getElementById('sc-unclear').textContent = unclear;
+        document.getElementById('sc-total').textContent = total;
+        document.getElementById('score-row').style.display = 'grid';
+
+        document.getElementById('result-file-info').textContent =
+          `${currentFile.name.replace(/\.[^.]+$/,'')} • заполнено ${filled} из ${total} полей`;
+        document.getElementById('result-file-section').style.display = 'block';
+        document.getElementById('result-text-section').style.display = 'none';
+        document.getElementById('result-section').style.display = 'block';
+        showSt('ai-status','ok',`✓ Готово! Заполнено ${filled} из ${total} полей. Нажмите «Скачать файл»`);
+      } catch(e) {
+        showSt('ai-status','err','Ошибка создания файла: '+e.message);
+      }
+
+    } else {
+      showResultText(aiText, q);
+    }
+
   } catch(e) { showSt('ai-status','err','Ошибка соединения: '+e.message); }
   btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+}
+
+function showResultText(text, q) {
+  document.getElementById('result-text').value = text;
+  document.getElementById('result-file-section').style.display = 'none';
+  document.getElementById('result-text-section').style.display = 'block';
+  document.getElementById('result-section').style.display = 'block';
+  const blanks = (q.match(/_{3,}/g)||[]).length;
+  const unclear = (text.match(/\[ТРЕБУЕТ УТОЧНЕНИЯ\]/g)||[]).length;
+  const filled = blanks - unclear;
+  const pct = blanks ? Math.round(filled/blanks*100) : 0;
+  document.getElementById('sc-filled').textContent = `${filled} (${pct}%)`;
+  document.getElementById('sc-unclear').textContent = unclear;
+  document.getElementById('sc-total').textContent = blanks;
+  document.getElementById('score-row').style.display = 'grid';
+  showSt('ai-status','ok',`✓ Готово! Заполнено ${filled} из ${blanks} полей (${pct}%)`);
 }
 
 function copyResult() {
@@ -838,20 +909,23 @@ function copyResult() {
   event.target.textContent='Скопировано!'; setTimeout(()=>event.target.textContent='Копировать',2000);
 }
 function clearFill() {
-  extractedText = '';
+  extractedText = ''; currentFile = null; currentFileExt = ''; filledFileBlob = null;
   document.getElementById('file-badge-wrap').style.display = 'none';
   document.getElementById('extract-status').innerHTML = '';
   const input = document.querySelector('#upload-zone input[type=file]');
   if (input) input.value = '';
-  document.getElementById('questionnaire').value='';
-  document.getElementById('result-section').style.display='none';
-  document.getElementById('ai-status').innerHTML='';
-  document.getElementById('score-row').style.display='none';
+  document.getElementById('questionnaire').value = '';
+  document.getElementById('result-section').style.display = 'none';
+  document.getElementById('ai-status').innerHTML = '';
+  document.getElementById('score-row').style.display = 'none';
 }
 
 // ── FILE UPLOAD ────────────────────────────────────────────────
 let extractedText = '';
 let currentSource = 'file';
+let currentFile = null;       // original File object
+let currentFileExt = '';      // 'docx' | 'xlsx' | 'xls'
+let filledFileBlob = null;    // result blob for download
 
 function switchSource(src) {
   currentSource = src;
@@ -878,19 +952,21 @@ async function processFile(file) {
   showExtractStatus('loading', `Читаю файл «${file.name}»...`);
   document.getElementById('file-badge-wrap').style.display = 'none';
   extractedText = '';
+  currentFile = null;
+  currentFileExt = '';
+  filledFileBlob = null;
 
   try {
-    if (ext === 'docx' || ext === 'doc') {
+    if (ext === 'docx') {
+      currentFile = file;
+      currentFileExt = 'docx';
       await extractDocx(file);
-    } else if (ext === 'pdf') {
-      await extractPdf(file);
     } else if (ext === 'xlsx' || ext === 'xls') {
+      currentFile = file;
+      currentFileExt = ext;
       await extractXlsx(file);
-    } else if (ext === 'txt') {
-      extractedText = await file.text();
-      onExtractDone(file.name, extractedText.length);
     } else {
-      showExtractStatus('err', 'Неподдерживаемый формат. Используйте DOCX, PDF, XLSX, XLS или TXT.');
+      showExtractStatus('err', 'Используйте DOCX (Word) или XLSX/XLS (Excel).');
       return;
     }
   } catch (err) {
@@ -899,10 +975,6 @@ async function processFile(file) {
 }
 
 async function extractDocx(file) {
-  if (typeof mammoth === 'undefined') {
-    showExtractStatus('err', 'Библиотека mammoth.js не загрузилась. Проверьте интернет-соединение.');
-    return;
-  }
   const arrayBuffer = await file.arrayBuffer();
   const result = await mammoth.extractRawText({ arrayBuffer });
   extractedText = result.value;
@@ -910,25 +982,17 @@ async function extractDocx(file) {
 }
 
 async function extractXlsx(file) {
-  if (typeof XLSX === 'undefined') {
-    showExtractStatus('err', 'Библиотека SheetJS не загрузилась. Проверьте интернет-соединение.');
-    return;
-  }
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: 'array' });
   let text = '';
   workbook.SheetNames.forEach(sheetName => {
     const sheet = workbook.Sheets[sheetName];
-    // Convert sheet to array of arrays for readable output
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     if (rows.length === 0) return;
     text += `[Лист: ${sheetName}]\n`;
     rows.forEach(row => {
-      // Filter out completely empty rows
       const cells = row.map(c => (c === null || c === undefined) ? '' : String(c).trim());
-      if (cells.some(c => c !== '')) {
-        text += cells.join('\t') + '\n';
-      }
+      if (cells.some(c => c !== '')) text += cells.join('\t') + '\n';
     });
     text += '\n';
   });
@@ -936,43 +1000,137 @@ async function extractXlsx(file) {
   onExtractDone(file.name, extractedText.length);
 }
 
-async function extractPdf(file) {
-  if (typeof pdfjsLib === 'undefined') {
-    showExtractStatus('err', 'Библиотека PDF.js не загрузилась. Проверьте интернет-соединение.');
-    return;
-  }
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let text = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const pageText = content.items.map(item => item.str).join(' ');
-    text += pageText + '\n';
-  }
-  extractedText = text;
-  onExtractDone(file.name, extractedText.length);
-}
-
 function onExtractDone(fileName, chars) {
   document.getElementById('file-name-badge').textContent = `📄 ${fileName} (${chars.toLocaleString('ru-RU')} симв.)`;
   document.getElementById('file-badge-wrap').style.display = 'block';
-  showExtractStatus('ok', `✓ Файл успешно прочитан. Нажмите «Заполнить с помощью ИИ»`);
+  showExtractStatus('ok', `✓ Файл прочитан. Нажмите «Заполнить с помощью ИИ»`);
 }
 
 function removeFile() {
-  extractedText = '';
+  extractedText = ''; currentFile = null; currentFileExt = ''; filledFileBlob = null;
   document.getElementById('file-badge-wrap').style.display = 'none';
   document.getElementById('extract-status').innerHTML = '';
-  // Reset file input
-  const zone = document.getElementById('upload-zone');
-  const input = zone.querySelector('input[type=file]');
-  input.value = '';
+  const input = document.querySelector('#upload-zone input[type=file]');
+  if (input) input.value = '';
 }
 
 function showExtractStatus(type, msg) {
   document.getElementById('extract-status').innerHTML = `<div class="status ${type}">${msg}</div>`;
+}
+
+// ── PRODUCE FILLED FILE ───────────────────────────────────────
+async function produceFilledDocx(pairs) {
+  // Load original docx as zip
+  const arrayBuffer = await currentFile.arrayBuffer();
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  let xml = await zip.file('word/document.xml').async('string');
+
+  // Replace blanks: ___ sequences and empty table cells after labels
+  // Strategy: for each pair {label, value}, find the label in XML and fill the nearest blank
+  for (const [label, value] of Object.entries(pairs)) {
+    if (!value || value === '[ТРЕБУЕТ УТОЧНЕНИЯ]') continue;
+    const safeVal = value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // Replace underscores pattern near this label
+    const underscoreRe = /_{3,}/g;
+    xml = xml.replace(underscoreRe, (match, offset) => {
+      // Check if label text appears within 2000 chars before this match
+      const before = xml.substring(Math.max(0, offset - 2000), offset);
+      const plainBefore = before.replace(/<[^>]+>/g, '');
+      if (plainBefore.includes(label.substring(0, Math.min(label.length, 20)))) {
+        return safeVal;
+      }
+      return match;
+    });
+  }
+
+  // Fallback: replace remaining ___ sequences in order with remaining values
+  const remainingValues = Object.entries(pairs)
+    .filter(([,v]) => v && v !== '[ТРЕБУЕТ УТОЧНЕНИЯ]')
+    .map(([,v]) => v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'));
+  let vi = 0;
+  xml = xml.replace(/_{3,}/g, () => {
+    if (vi < remainingValues.length) return remainingValues[vi++];
+    return '___';
+  });
+
+  zip.file('word/document.xml', xml);
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  return blob;
+}
+
+async function produceFilledXlsx(pairs) {
+  const arrayBuffer = await currentFile.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+  workbook.SheetNames.forEach(sheetName => {
+    const sheet = workbook.Sheets[sheetName];
+    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:Z100');
+
+    // Build a map: row -> {labelCol, valueCol} for rows where next col is empty
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const cellAddr = XLSX.utils.encode_cell({ r: R, c: C });
+        const cell = sheet[cellAddr];
+        if (!cell) continue;
+        const cellVal = String(cell.v || '').trim();
+        if (!cellVal) continue;
+
+        // Check if this cell is empty (blank field) — look for ___ or truly empty
+        const isBlank = /^_{2,}$/.test(cellVal) || cellVal === '' || cellVal === '-';
+
+        // Find matching pair by looking at label in same row or previous cell
+        for (const [label, value] of Object.entries(pairs)) {
+          if (!value || value === '[ТРЕБУЕТ УТОЧНЕНИЯ]') continue;
+          if (isBlank) {
+            // Check cell to the left for matching label
+            if (C > 0) {
+              const leftAddr = XLSX.utils.encode_cell({ r: R, c: C - 1 });
+              const leftCell = sheet[leftAddr];
+              const leftVal = leftCell ? String(leftCell.v || '') : '';
+              if (leftVal.toLowerCase().includes(label.toLowerCase().substring(0, 15))) {
+                sheet[cellAddr] = { t: 's', v: value };
+                delete pairs[label]; // use each value once
+                break;
+              }
+            }
+            // Check cell above
+            if (R > 0) {
+              const aboveAddr = XLSX.utils.encode_cell({ r: R - 1, c: C });
+              const aboveCell = sheet[aboveAddr];
+              const aboveVal = aboveCell ? String(aboveCell.v || '') : '';
+              if (aboveVal.toLowerCase().includes(label.toLowerCase().substring(0, 15))) {
+                sheet[cellAddr] = { t: 's', v: value };
+                delete pairs[label];
+                break;
+              }
+            }
+          }
+          // Replace ___ in cell value
+          if (typeof cell.v === 'string' && /_{2,}/.test(cell.v)) {
+            sheet[cellAddr] = { t: 's', v: cell.v.replace(/_{2,}/g, value) };
+            break;
+          }
+        }
+      }
+    }
+  });
+
+  const wbout = XLSX.write(workbook, { bookType: currentFileExt === 'xls' ? 'xls' : 'xlsx', type: 'array' });
+  const mimeType = currentFileExt === 'xls'
+    ? 'application/vnd.ms-excel'
+    : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  return new Blob([wbout], { type: mimeType });
+}
+
+function downloadFilledFile() {
+  if (!filledFileBlob || !currentFile) return;
+  const ext = currentFileExt;
+  const baseName = currentFile.name.replace(/\.[^.]+$/, '');
+  const outName = `${baseName}_заполнено.${ext}`;
+  const url = URL.createObjectURL(filledFileBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = outName; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 // ── INIT ───────────────────────────────────────────────────────
