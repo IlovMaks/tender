@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Тендерный ассистент — Стройэкспертнадзор</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root {
+  --bg: #f5f4f0;
+  --surface: #ffffff;
+  --surface2: #f0efe9;
+  --border: rgba(0,0,0,0.10);
+  --border2: rgba(0,0,0,0.18);
+  --text: #1a1917;
+  --text2: #6b6960;
+  --text3: #9e9c95;
+  --accent: #1a4a2e;
+  --accent-light: #e8f0eb;
+  --accent-text: #1a4a2e;
+  --warn: #7a4a00;
+  --warn-bg: #fef3dc;
+  --danger: #7a1a1a;
+  --danger-bg: #fdeaea;
+  --ok: #1a4a2e;
+  --ok-bg: #e8f0eb;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Manrope', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--sans); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
+
+/* LAYOUT */
+.shell { display: flex; min-height: 100vh; }
+.sidebar { width: 220px; flex-shrink: 0; background: var(--accent); padding: 24px 0; display: flex; flex-direction: column; position: fixed; top: 0; left: 0; height: 100vh; z-index: 10; }
+.sidebar-logo { padding: 0 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.12); margin-bottom: 16px; }
+.sidebar-logo .logo-icon { font-size: 22px; margin-bottom: 6px; }
+.sidebar-logo h1 { font-size: 13px; font-weight: 600; color: #fff; line-height: 1.3; }
+.sidebar-logo p { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 20px; cursor: pointer; color: rgba(255,255,255,0.65); font-size: 13px; font-weight: 500; transition: all 0.15s; border-left: 3px solid transparent; }
+.nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.nav-item.active { background: rgba(255,255,255,0.12); color: #fff; border-left-color: #7ec8a0; }
+.nav-item .icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+.nav-badge { margin-left: auto; background: rgba(255,255,255,0.2); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 10px; }
+.sidebar-footer { margin-top: auto; padding: 16px 20px 0; border-top: 1px solid rgba(255,255,255,0.12); }
+.api-status { font-size: 11px; color: rgba(255,255,255,0.5); }
+.api-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #f87; margin-right: 5px; }
+.api-dot.ok { background: #7ec8a0; }
+
+.main { margin-left: 220px; padding: 32px; max-width: 960px; }
+.page { display: none; }
+.page.active { display: block; }
+.page-title { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+.page-sub { font-size: 13px; color: var(--text2); margin-bottom: 24px; }
+
+/* SECTIONS */
+.section-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); margin: 20px 0 10px; }
+.section-label:first-child { margin-top: 0; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 12px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field.full { grid-column: 1 / -1; }
+.field label { font-size: 11px; color: var(--text2); font-weight: 500; }
+input, select, textarea { font-family: var(--sans); font-size: 13px; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface2); color: var(--text); width: 100%; transition: border 0.15s; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); background: #fff; }
+textarea { resize: vertical; }
+
+/* BUTTONS */
+.btn { padding: 8px 18px; font-family: var(--sans); font-size: 13px; font-weight: 500; border: 1px solid var(--border2); border-radius: var(--radius); cursor: pointer; background: #fff; color: var(--text); transition: all 0.15s; }
+.btn:hover { background: var(--surface2); }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.primary:hover { opacity: 0.88; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+/* PERSON CARD */
+.person-card { background: var(--surface2); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+.person-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text3); margin-bottom: 10px; }
+
+/* SRO */
+.sro-item { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 8px; background: var(--surface); }
+.sro-item.filled { border-color: #7ec8a0; }
+.sro-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.sro-name { font-size: 13px; font-weight: 600; color: var(--accent); }
+.rm-btn { font-size: 11px; background: none; border: none; color: var(--text3); cursor: pointer; padding: 3px 7px; border-radius: 4px; }
+.rm-btn:hover { background: var(--danger-bg); color: var(--danger); }
+.add-btn { width: 100%; padding: 9px; font-size: 12px; border: 1px dashed var(--border2); border-radius: var(--radius); background: none; cursor: pointer; color: var(--text2); margin-top: 6px; font-family: var(--sans); }
+.add-btn:hover { background: var(--surface2); }
+
+/* REV TABLE */
+.rev-grid { display: grid; grid-template-columns: 64px 1fr 1fr; gap: 8px; align-items: center; margin-bottom: 8px; }
+.rev-year { font-size: 13px; font-weight: 600; color: var(--text2); text-align: right; }
+.rev-heads { display: grid; grid-template-columns: 64px 1fr 1fr; gap: 8px; margin-bottom: 5px; }
+.rev-h { font-size: 11px; color: var(--text3); font-weight: 500; }
+
+/* STATUS */
+.status { font-size: 12px; padding: 9px 13px; border-radius: var(--radius); margin-top: 10px; }
+.status.ok { background: var(--ok-bg); color: var(--ok); }
+.status.loading { background: var(--surface2); color: var(--text2); }
+.status.err { background: var(--danger-bg); color: var(--danger); }
+.status.warn { background: var(--warn-bg); color: var(--warn); }
+
+/* AI FILL */
+.ai-textarea { min-height: 180px; font-family: var(--mono); font-size: 12px; }
+.result-wrap { position: relative; margin-top: 14px; }
+.result-wrap textarea { min-height: 320px; font-family: var(--mono); font-size: 12px; background: var(--surface2); }
+.copy-abs { position: absolute; top: 8px; right: 8px; padding: 4px 10px; font-size: 11px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-family: var(--sans); color: var(--text2); }
+.copy-abs:hover { color: var(--text); }
+
+/* SCORE */
+.score-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.sc { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; }
+.sc .v { font-size: 22px; font-weight: 600; }
+.sc .l { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.sc.green .v { color: var(--ok); }
+.sc.amber .v { color: var(--warn); }
+
+/* EXPERIENCE TABLE */
+.exp-controls { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+.exp-controls input { flex: 1; min-width: 180px; }
+.exp-controls select { min-width: 130px; }
+.exp-count { font-size: 12px; color: var(--text2); white-space: nowrap; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead tr { border-bottom: 2px solid var(--border); }
+th { text-align: left; padding: 7px 8px; font-size: 11px; font-weight: 600; color: var(--text2); white-space: nowrap; text-transform: uppercase; letter-spacing: 0.04em; }
+td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.4; }
+tr:hover td { background: var(--surface2); }
+.tag { display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 20px; white-space: nowrap; font-weight: 500; }
+.tag-sk { background: #dceef5; color: #1a4a6e; }
+.tag-tz { background: var(--warn-bg); color: var(--warn); }
+.tag-obs { background: var(--ok-bg); color: var(--ok); }
+.pag { display: flex; align-items: center; gap: 6px; margin-top: 14px; justify-content: center; flex-wrap: wrap; }
+.pag button { padding: 4px 10px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; background: #fff; color: var(--text2); font-family: var(--sans); }
+.pag button:hover { background: var(--surface2); color: var(--text); }
+.pag button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pag .pi { font-size: 12px; color: var(--text2); }
+
+/* API KEY MODAL */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; display: flex; align-items: center; justify-content: center; }
+.modal { background: #fff; border-radius: var(--radius-lg); padding: 28px; width: 420px; max-width: 90vw; }
+.modal h2 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.modal p { font-size: 13px; color: var(--text2); margin-bottom: 16px; line-height: 1.6; }
+.modal input { margin-bottom: 12px; }
+.modal a { color: var(--accent); }
+.modal-row { display: flex; gap: 8px; }
+
+/* PROGRESS BAR */
+.prog-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+.prog-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.prog-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.4s; }
+.prog-label { font-size: 13px; font-weight: 600; min-width: 38px; text-align: right; }
+
+/* UPLOAD ZONE */
+.upload-zone { border: 2px dashed var(--border2); border-radius: var(--radius-lg); padding: 28px 20px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--surface); position: relative; margin-bottom: 12px; }
+.upload-zone:hover, .upload-zone.drag-over { border-color: var(--accent); background: var(--accent-light); }
+.upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.upload-zone .uz-icon { font-size: 28px; margin-bottom: 8px; }
+.upload-zone .uz-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.upload-zone .uz-sub { font-size: 12px; color: var(--text2); }
+.file-badge { display: inline-flex; align-items: center; gap: 7px; background: var(--accent-light); border: 1px solid #b5d4be; border-radius: var(--radius); padding: 6px 12px; font-size: 12px; font-weight: 500; color: var(--accent-text); margin-bottom: 10px; }
+.file-badge .fb-remove { cursor: pointer; color: var(--text3); font-size: 14px; line-height: 1; padding: 0 2px; }
+.file-badge .fb-remove:hover { color: var(--danger); }
+.source-tabs { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 12px; width: fit-content; }
+.source-tab { padding: 7px 16px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; background: none; color: var(--text2); font-family: var(--sans); transition: all 0.15s; border-right: 1px solid var(--border); }
+.source-tab:last-child { border-right: none; }
+.source-tab.active { background: var(--accent); color: #fff; }
+
+@media (max-width: 700px) {
+  .sidebar { width: 100%; height: auto; position: relative; flex-direction: row; flex-wrap: wrap; padding: 12px; }
+  .main { margin-left: 0; padding: 16px; }
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  .score-row { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- API KEY MODAL -->
+<div class="modal-bg" id="modal" style="display:none">
+  <div class="modal">
+    <h2>🔑 Введите API-ключ Anthropic</h2>
+    <p>Для работы ИИ-заполнения нужен ключ. Получите его бесплатно на <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> → API Keys → Create Key.<br><br>Ключ сохраняется только в вашем браузере.</p>
+    <input type="password" id="api-input" placeholder="sk-ant-api03-...">
+    <div class="modal-row">
+      <button class="btn primary" onclick="saveKey()" style="flex:1">Сохранить и продолжить</button>
+      <button class="btn" onclick="closeModal()">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<div class="shell">
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">🏗</div>
+      <h1>Стройэкспертнадзор</h1>
+      <p>Тендерный ассистент</p>
+    </div>
+    <div class="nav-item active" onclick="showPage('db', this)"><span class="icon">📋</span>База компании</div>
+    <div class="nav-item" onclick="showPage('fin', this)"><span class="icon">📊</span>Финансы</div>
+    <div class="nav-item" onclick="showPage('sro', this)"><span class="icon">🏛</span>СРО <span class="nav-badge" id="sro-cnt">3</span></div>
+    <div class="nav-item" onclick="showPage('exp', this)"><span class="icon">📁</span>Опыт работ <span class="nav-badge">184</span></div>
+    <div class="nav-item" onclick="showPage('fill', this)"><span class="icon">✨</span>Заполнить анкету</div>
+    <div class="sidebar-footer">
+      <div class="api-status"><span class="api-dot" id="api-dot"></span><span id="api-status-text">API-ключ не задан</span></div>
+      <button class="btn" style="margin-top:8px;width:100%;font-size:11px" onclick="document.getElementById('modal').style.display='flex'">Изменить ключ</button>
+    </div>
+  </nav>
+
+  <main class="main">
+
+    <!-- PAGE: БАЗА -->
+    <div class="page active" id="page-db">
+      <div class="page-title">База компании</div>
+      <div class="page-sub">Реквизиты, контакты и руководство ООО «Стройэкспертнадзор»</div>
+
+      <div class="prog-wrap">
+        <span style="font-size:12px;color:var(--text2)">Полнота базы</span>
+        <div class="prog-track"><div class="prog-fill" id="prog-fill" style="width:95%"></div></div>
+        <span class="prog-label" id="prog-label">95%</span>
+      </div>
+
+      <div class="section-label">Основные реквизиты</div>
+      <div class="card">
+        <div class="grid2">
+          <div class="field full"><label>Полное наименование</label><input id="fullname" value="Общество с ограниченной ответственностью «Строительная экспертиза и технадзор»"></div>
+          <div class="field full"><label>Краткое наименование</label><input id="shortname" value="ООО «СТРОЙЭКСПЕРТНАДЗОР»"></div>
+          <div class="field"><label>ИНН</label><input id="inn" value="7736557940"></div>
+          <div class="field"><label>КПП</label><input id="kpp" value="772901001"></div>
+          <div class="field"><label>ОГРН</label><input id="ogrn" value="5077746687728"></div>
+          <div class="field"><label>ОКПО</label><input id="okpo" value="80751387"></div>
+          <div class="field"><label>ОКАТО</label><input id="okato" value="45268581000"></div>
+          <div class="field"><label>ОКВЭД</label><input id="okved" value="71.2"></div>
+          <div class="field"><label>ОКФС</label><input id="okfs" value="16"></div>
+          <div class="field"><label>ОКОПФ</label><input id="okopf" value="65 (12300)"></div>
+          <div class="field"><label>Дата регистрации</label><input id="regdate" value="19.04.2007"></div>
+          <div class="field"><label>Уставный капитал, руб.</label><input id="capital" value="10 000"></div>
+        </div>
+      </div>
+
+      <div class="section-label">Адреса</div>
+      <div class="card">
+        <div class="grid2">
+          <div class="field full"><label>Юридический адрес</label><input id="addr" value="119415, г. Москва, ул. Удальцова, дом 23, подвал 1, пом. XVА, этаж 1, пом. XXVа"></div>
+          <div class="field full"><label>Фактический адрес</label><input id="addr2" value="119415, г. Москва, ул. Удальцова, дом 23"></div>
+        </div>
+      </div>
+
+      <div class="section-label">Банковские реквизиты</div>
+      <div class="card">
+        <div class="grid2">
+          <div class="field full"><label>Наименование банка</label><input id="bank" value="АО «АЛЬФА-БАНК»"></div>
+          <div class="field"><label>Расчётный счёт</label><input id="rs" value="40702810702300004960"></div>
+          <div class="field"><label>Корреспондентский счёт</label><input id="ks" value="30101810200000000593"></div>
+          <div class="field"><label>БИК</label><input id="bik" value="044525593"></div>
+        </div>
+      </div>
+
+      <div class="section-label">Контакты</div>
+      <div class="card">
+        <div class="grid2">
+          <div class="field"><label>Телефон</label><input id="phone" value="8 (499) 213-33-13"></div>
+          <div class="field"><label>Email</label><input id="email" value="info@seitn.ru; mail@seitn.ru"></div>
+          <div class="field"><label>Сайт</label><input id="site" value="seitn.ru"></div>
+          <div class="field"><label>Налоговый орган</label><input id="nalog" value="ИФНС России № 29 по г. Москве"></div>
+          <div class="field"><label>Система налогообложения</label><input id="tax" value="УСН"></div>
+          <div class="field"><label>Категория МСП</label><input id="msp" value="Малое предприятие"></div>
+          <div class="field"><label>Рег. номер ПФР</label><input id="pfr" value="1002601647"></div>
+          <div class="field"><label>Рег. номер ФСС</label><input id="fss" value="1002601647"></div>
+        </div>
+      </div>
+
+      <div class="section-label">Руководство</div>
+      <div class="person-card">
+        <div class="person-title">Генеральный директор</div>
+        <div class="grid2">
+          <div class="field"><label>ФИО</label><input id="ceo" value="Топчиев Владимир Иванович"></div>
+          <div class="field"><label>Должность</label><input id="ceo_pos" value="Генеральный директор"></div>
+          <div class="field"><label>Основание полномочий</label><input id="ceo_basis" value="Устав"></div>
+          <div class="field"><label>ИНН</label><input id="ceo_inn" value="773601246015"></div>
+        </div>
+      </div>
+      <div class="person-card">
+        <div class="person-title">Главный бухгалтер</div>
+        <div class="grid2">
+          <div class="field"><label>ФИО</label><input id="cfo" value="Гурова Оксана Сергеевна"></div>
+          <div class="field"><label>Должность</label><input id="cfo_pos" value="Главный бухгалтер"></div>
+        </div>
+      </div>
+
+      <div class="section-label">Штатная численность</div>
+      <div class="card">
+        <div class="grid3">
+          <div class="field"><label>Среднесписочная (всего)</label><input id="staff" value="27" type="number"></div>
+          <div class="field"><label>Руководители</label><input id="managers" value="4" type="number"></div>
+          <div class="field"><label>ИТР / специалисты</label><input id="itr" value="23" type="number"></div>
+        </div>
+      </div>
+
+      <div class="section-label">Описание деятельности</div>
+      <div class="card">
+        <textarea id="desc" rows="3">Технический заказчик, строительный контроль, обследование и строительная экспертиза.</textarea>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn primary" onclick="saveDB()">Сохранить изменения</button>
+        <button class="btn" onclick="loadDB()">Загрузить сохранённое</button>
+      </div>
+      <div id="db-status"></div>
+    </div>
+
+    <!-- PAGE: ФИНАНСЫ -->
+    <div class="page" id="page-fin">
+      <div class="page-title">Финансовые показатели</div>
+      <div class="page-sub">Данные бухгалтерской отчётности для подстановки в анкеты</div>
+      <div class="card">
+        <div class="rev-heads">
+          <div></div>
+          <div class="rev-h">Выручка, руб.</div>
+          <div class="rev-h">Чистая прибыль, руб.</div>
+        </div>
+        <div id="rev-rows"></div>
+      </div>
+    </div>
+
+    <!-- PAGE: СРО -->
+    <div class="page" id="page-sro">
+      <div class="page-title">СРО и лицензии</div>
+      <div class="page-sub">Действующие выписки из реестров НОСТРОЙ и НОПРИЗ</div>
+      <div id="sro-list"></div>
+      <button class="add-btn" onclick="addSRO()">+ Добавить СРО / лицензию</button>
+    </div>
+
+    <!-- PAGE: ОПЫТ -->
+    <div class="page" id="page-exp">
+      <div class="page-title">Опыт выполнения работ</div>
+      <div class="page-sub">184 объекта — строительный контроль, технический заказчик, обследования и экспертизы</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">
+        <div class="sc green"><div class="v">95</div><div class="l">Стр. контроль / Техзаказчик</div></div>
+        <div class="sc"><div class="v">89</div><div class="l">Обследования и экспертизы</div></div>
+        <div class="sc"><div class="v">2015–2026</div><div class="l">Период работы</div></div>
+      </div>
+      <div class="exp-controls">
+        <input type="text" id="exp-search" placeholder="Поиск по заказчику, объекту, региону..." oninput="renderExp()">
+        <select id="exp-type" onchange="renderExp()">
+          <option value="">Все направления</option>
+          <option value="sk">Строительный контроль</option>
+          <option value="tz">Технический заказчик</option>
+          <option value="obs">Обследования</option>
+        </select>
+        <select id="exp-year" onchange="renderExp()"><option value="">Все годы</option></select>
+        <span class="exp-count" id="exp-count"></span>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>#</th><th>Заказчик</th><th>Объект</th><th>Вид</th><th>Регион</th><th>Год</th><th>Сумма, ₽</th></tr></thead>
+          <tbody id="exp-tbody"></tbody>
+        </table>
+      </div>
+      <div class="pag" id="exp-pag"></div>
+    </div>
+
+    <!-- PAGE: ЗАПОЛНИТЬ -->
+    <div class="page" id="page-fill">
+      <div class="page-title">Заполнить анкету заказчика</div>
+      <div class="page-sub">Загрузите файл или вставьте текст — ИИ заполнит анкету данными из базы компании</div>
+
+      <div class="score-row" id="score-row" style="display:none">
+        <div class="sc green"><div class="v" id="sc-filled">—</div><div class="l">Полей заполнено</div></div>
+        <div class="sc amber"><div class="v" id="sc-unclear">—</div><div class="l">Требуют уточнения</div></div>
+        <div class="sc"><div class="v" id="sc-total">—</div><div class="l">Всего полей</div></div>
+      </div>
+
+      <div class="section-label">Анкета заказчика</div>
+
+      <div class="source-tabs">
+        <button class="source-tab active" id="tab-file-btn" onclick="switchSource('file')">📎 Загрузить файл</button>
+        <button class="source-tab" id="tab-text-btn" onclick="switchSource('text')">✏️ Вставить текст</button>
+      </div>
+
+      <!-- FILE UPLOAD -->
+      <div id="source-file">
+        <div class="upload-zone" id="upload-zone"
+             ondragover="event.preventDefault();this.classList.add('drag-over')"
+             ondragleave="this.classList.remove('drag-over')"
+             ondrop="handleDrop(event)">
+          <input type="file" accept=".docx,.doc,.pdf,.txt" onchange="handleFileInput(this)">
+          <div class="uz-icon">📄</div>
+          <div class="uz-title">Перетащите файл или нажмите для выбора</div>
+          <div class="uz-sub">Поддерживаются форматы: DOCX, PDF, TXT</div>
+        </div>
+        <div id="file-badge-wrap" style="display:none">
+          <div class="file-badge">
+            <span id="file-name-badge"></span>
+            <span class="fb-remove" onclick="removeFile()" title="Удалить файл">✕</span>
+          </div>
+        </div>
+        <div id="extract-status"></div>
+      </div>
+
+      <!-- TEXT INPUT -->
+      <div id="source-text" style="display:none">
+        <div class="card">
+          <textarea class="ai-textarea" id="questionnaire" placeholder="Вставьте сюда текст анкеты от заказчика...&#10;&#10;Пример:&#10;1. Полное наименование организации: ___&#10;2. ИНН / КПП: ___&#10;3. ОГРН: ___&#10;4. Расчётный счёт: ___&#10;5. Генеральный директор: ___&#10;..."></textarea>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn primary" onclick="fillWithAI()" id="ai-btn">✨ Заполнить с помощью ИИ</button>
+        <button class="btn" onclick="clearFill()">Очистить</button>
+      </div>
+      <div id="ai-status"></div>
+
+      <div id="result-section" style="display:none;margin-top:20px">
+        <div class="section-label">Готовая заполненная анкета</div>
+        <div class="result-wrap">
+          <textarea id="result-text" readonly></textarea>
+          <button class="copy-abs" onclick="copyResult()">Копировать</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── DATA ──────────────────────────────────────────────────────
+const YEARS = [2022, 2023, 2024];
+const REV_DEFAULTS = {
+  2022: { rev: '73 210 000', profit: '' },
+  2023: { rev: '127 274 000', profit: '6 992 000' },
+  2024: { rev: '233 033 000', profit: '15 729 000' }
+};
+
+const SRO_DATA = [
+  { type: 'СРО на строительство', name: 'Ассоциация «Архитектурное наследие»', regSRO: 'СРО-С-230-07092010', member: '291116/211', since: '29.11.2016', level: 'Первый уровень — не превышает 90 000 000 руб. (включая особо опасные объекты)', works: 'Строительство, реконструкция, капитальный ремонт, снос ОКС' },
+  { type: 'СРО на инженерные изыскания', name: 'Ассоциация «Национальный Альянс изыскателей «ГеоЦентр»', regSRO: 'СРО-И-037-18122012', member: 'И-037-007736557940-1001', since: '25.05.2017', level: 'Первый уровень — не превышает 25 000 000 руб.', works: 'Инженерные изыскания в отношении ОКС (кроме особо опасных и атомной энергии)' },
+  { type: 'СРО на проектирование', name: 'Ассоциация проектировщиков «СтройОбъединение»', regSRO: 'СРО-П-145-04032010', member: 'П-145-007736557940-0455', since: '17.09.2010', level: 'Второй уровень — не превышает 50 000 000 руб.', works: 'Подготовка проектной документации в отношении ОКС (кроме особо опасных и атомной энергии)' }
+];
+
+const SK = [
+  {c:'Перекресток',s:'Строительный контроль',o:'Супермаркеты',r:'РФ',a:1500,sum:5430000,y1:2015,y2:2023},
+  {c:'ООО БИЛЛА',s:'Строительный контроль',o:'Супермаркеты',r:'Москва и МО',a:150000,sum:15000000,y1:2017,y2:2021},
+  {c:'ПАО МТС',s:'Строительный контроль',o:'ЦОД',r:'Нижний Новгород',a:571,sum:5000000,y1:2017,y2:2019},
+  {c:'ООО «ЭТЦ в Парковом»',s:'Строительный контроль',o:'Гостиница',r:'Ялта',a:7000,sum:10980000,y1:2017,y2:2019},
+  {c:'ПАО Ростелеком',s:'Строительный контроль',o:'Административное здание',r:'Москва',a:15000,sum:3200000,y1:2018,y2:2019},
+  {c:'АО «Бизнес-Недвижимость»',s:'Строительный контроль',o:'Жилой дом',r:'Москва',a:24000,sum:2200000,y1:2018,y2:2019},
+  {c:'ПАО «Газпром»',s:'Строительный контроль',o:'Административное здание',r:'Москва',a:30000,sum:21000000,y1:2019,y2:2024},
+  {c:'ООО «Терминал Никольский»',s:'Строительный контроль',o:'Логистический центр',r:'Смоленск',a:7186,sum:7440000,y1:2019,y2:2021},
+  {c:'ООО «Курорт Доброград»',s:'Строительный контроль',o:'Гостиница',r:'Владимир',a:9056,sum:21060000,y1:2019,y2:2023},
+  {c:'ПАО МТС',s:'Строительный контроль',o:'ЦОД',r:'Санкт-Петербург',a:968,sum:5500000,y1:2019,y2:2021},
+  {c:'ГИПЕРГЛОБУС',s:'Строительный контроль',o:'Торговые центры',r:'РФ',a:1500,sum:2000000,y1:2019,y2:2023},
+  {c:'ПАО МТС',s:'Технический заказчик',o:'ЦОД',r:'Владивосток',a:7000,sum:3600000,y1:2020,y2:2021},
+  {c:'ПАО МТС',s:'Технический заказчик',o:'ЦОД',r:'Новосибирск',a:968,sum:7200000,y1:2020,y2:2022},
+  {c:'ООО «СХА-1»',s:'Строительный контроль',o:'ПСК Есипово',r:'Москва',a:12000,sum:6286212,y1:2020,y2:2021},
+  {c:'ООО «СХА-1»',s:'Строительный контроль',o:'Склад Сынково',r:'Москва',a:12000,sum:6240000,y1:2020,y2:2021},
+  {c:'ООО «СХА-1»',s:'Строительный контроль',o:'ПСК Меридиан',r:'Москва',a:9000,sum:6286212,y1:2020,y2:2021},
+  {c:'ООО «СХА-1»',s:'Строительный контроль',o:'ПСК Новоселки',r:'Москва',a:10000,sum:6286212,y1:2020,y2:2021},
+  {c:'ООО «Новый Импульс-50»',s:'Строительный контроль',o:'Склад (чистые помещения)',r:'Москва',a:15000,sum:8640000,y1:2020,y2:2021},
+  {c:'Макдоналдс',s:'Строительный контроль',o:'Предприятия быстрого питания',r:'РФ',a:36000,sum:9647000,y1:2020,y2:2022},
+  {c:'ПАО МТС',s:'Технический заказчик',o:'ЦОД',r:'Московская область',a:222,sum:1350000,y1:2021,y2:2021},
+  {c:'ООО «СИБУР»',s:'Строительный контроль',o:'Офис',r:'Москва',a:600,sum:7200000,y1:2021,y2:2022},
+  {c:'ООО «Агропарк»',s:'Технический заказчик',o:'Автодорога',r:'Московская область',a:24754,sum:1200000,y1:2021,y2:2023},
+  {c:'АО «ТСТ Транссервис»',s:'Строительный контроль',o:'Логистический комплекс ТСТ-3',r:'Московская область',a:25000,sum:2610000,y1:2021,y2:2024},
+  {c:'ООО «СБЕРАВТОТЕХ»',s:'Строительный контроль',o:'Офисы',r:'Москва',a:14000,sum:6520000,y1:2021,y2:2022},
+  {c:'ООО «ОЦРВ»',s:'Строительный контроль',o:'Административное здание',r:'Сочи',a:9000,sum:8960000,y1:2021,y2:2023},
+  {c:'ПАО «ЛУКОЙЛ»',s:'Строительный контроль',o:'Административное здание',r:'Москва',a:5000,sum:14580000,y1:2022,y2:2024},
+  {c:'ООО «Лента»',s:'Строительный контроль',o:'Супермаркеты',r:'РФ',a:120000,sum:12300000,y1:2022,y2:null},
+  {c:'ПАО «МегаФон»',s:'Строительный контроль',o:'ЦОД',r:'Санкт-Петербург',a:1500,sum:15000000,y1:2022,y2:2025},
+  {c:'ПАО «МегаФон»',s:'Строительный контроль',o:'ЦОД',r:'Новосибирск',a:1500,sum:15000000,y1:2023,y2:null},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'Пенза',a:150000,sum:6120000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'Омск',a:150000,sum:5880000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'МО Сенькино',a:150000,sum:6240000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'МО Софьино',a:150000,sum:6240000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'Сарапул',a:170000,sum:6600000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'Волгоград',a:266000,sum:10659000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'Симферополь',a:180000,sum:6360000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'Химки',a:250000,sum:7800000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'Санкт-Петербург',a:200000,sum:6120000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'Невинномыск',a:150000,sum:7680000,y1:2023,y2:2024},
+  {c:'ООО «ВБ Девелопмент»',s:'Строительный контроль',o:'Склад',r:'Тверь',a:240000,sum:8400000,y1:2023,y2:2024},
+  {c:'ООО «ХСА-1»',s:'Строительный контроль',o:'Industrial City A,B',r:'Московская область',a:18000,sum:7380000,y1:2023,y2:2025},
+  {c:'ООО «ХСА-1»',s:'Строительный контроль',o:'Industrial City D,E',r:'Московская область',a:80000,sum:54000000,y1:2023,y2:2025},
+  {c:'ООО «СЗ «Доброград»',s:'Строительный контроль',o:'Парк-отель',r:'Владимир',a:14000,sum:21420000,y1:2023,y2:2023},
+  {c:'ООО «АШАН»',s:'Строительный контроль',o:'Гипермаркеты',r:'РФ',a:30000,sum:50000000,y1:2023,y2:null},
+  {c:'ФСК Лидер',s:'Строительный контроль',o:'Жилой дом',r:'Москва',a:230000,sum:65202300,y1:2023,y2:2024},
+  {c:'СЗ Симоновская',s:'Строительный контроль',o:'ЖК Foriver',r:'Москва',a:30000,sum:15000000,y1:2024,y2:2025},
+  {c:'ПАО «НЛМК»',s:'Строительный контроль',o:'Подстанция ГПП 5',r:'Липецк',a:3600,sum:999750,y1:2024,y2:2024},
+  {c:'АО «РЖД-Здоровье»',s:'Строительный контроль',o:'Гостиница Azimut',r:'Белокуриха',a:null,sum:36000000,y1:2024,y2:null},
+  {c:'ООО «Байкал-Сервис ТК»',s:'Строительный контроль',o:'Складской комплекс',r:'Ростовская область',a:38159,sum:6324000,y1:2025,y2:null},
+  {c:'ООО «АгроВит»',s:'Строительный контроль',o:'Молочно-товарная ферма',r:'Ивановская область',a:37000,sum:9000000,y1:2025,y2:null},
+  {c:'ООО «Джора» (Azimut)',s:'Строительный контроль',o:'Гостиничный комплекс 180 номеров',r:'Дербент',a:12000,sum:44000000,y1:2025,y2:null},
+  {c:'АО «ЧГГК»',s:'Строительный контроль',o:'Склад ГСМ',r:'Певек',a:60000,sum:7774510,y1:2025,y2:null},
+  {c:'ООО «ФАБЕРЛИК НЭЙЧУРАЛ ЛАБС»',s:'Строительный контроль',o:'ПСК с АБП',r:'Ступино',a:10600,sum:29392125,y1:2026,y2:null},
+];
+
+const OBS = [
+  {c:'ООО «РБЕ»',o:'Завод (индивидуальные рационы)',t:'Строительно-техническая экспертиза',r:'Москва',sum:3000000,y:2026},
+  {c:'ООО «Феникс»',o:'МФК «Бронка»',t:'Комплексное обследование зданий',r:'Санкт-Петербург',sum:13387500,y:2026},
+  {c:'ООО «СПЛАТ ГЛОБАЛ»',o:'Складской корпус с АБ',t:'Обследование незавершённого строительства',r:'Московская область',sum:1050000,y:2025},
+  {c:'АО ЦВ «ПРОТЕК»',o:'Склад',t:'Обследование конструкций и инженерных систем',r:'Калининград',sum:1500000,y:2025},
+  {c:'АО «Бонолит»',o:'Производственный комплекс (6 зданий)',t:'Техническое обследование',r:'Старая Купавна',sum:2945250,y:2025},
+  {c:'ООО «Медпроектстрой»',o:'Здания МосГумУ',t:'Комплексное обследование',r:'Москва',sum:2075000,y:2025},
+  {c:'ООО «Атлас»',o:'Модульные контейнеры 14 шт.',t:'Проверка соответствия проекту',r:'Трасса М-9',sum:1500000,y:2025},
+  {c:'ООО «ФОРТСТРОЙ»',o:'Производственное здание',t:'ВИО — несущая способность конструкций',r:'Московская область',sum:975000,y:2025},
+  {c:'ООО «УК Отель Патриот»',o:'Парк «Патриот»',t:'Строительный аудит',r:'Московская область',sum:1155000,y:2025},
+  {c:'ООО «ЭТЦ в Парковом»',o:'Административные здания',t:'Обследование конструкций и инженерных систем',r:'Ялта',sum:1050000,y:2025},
+  {c:'ООО «СЗ Симоновская»',o:'Квартиры',t:'Приёмка квартир, ВИО',r:'Москва',sum:2009000,y:2024},
+  {c:'ООО «СиАрСиСи Рус»',o:'МКД',t:'Инструментальное техническое обследование',r:'Москва',sum:980000,y:2024},
+  {c:'ООО «ИНГРАД-КАПИТАЛ»',o:'МКД',t:'Оценка технического состояния',r:'Москва',sum:2300000,y:2024},
+  {c:'ООО «ВАЙЛДБЕРРИЗ»',o:'Административное здание',t:'Экспертиза объёмов и качества СМР',r:'Санкт-Петербург',sum:5400000,y:2022},
+  {c:'ООО «АДМ СпецРТ»',o:'Здание РАН',t:'Комплексное обследование',r:'Москва',sum:3050000,y:2022},
+  {c:'ПАО «КБ Восточный»',o:'Административное здание',t:'Комплексное обследование',r:'Москва',sum:1780000,y:2021},
+  {c:'ООО «СМОЛЕНСКИЙ ПАССАЖ»',o:'Торгово-деловой комплекс',t:'Обследование фасада',r:'Москва',sum:356000,y:2021},
+];
+
+// ── STATE ──────────────────────────────────────────────────────
+let sroCount = 0;
+let expPage = 1;
+const EXP_PAGE = 20;
+
+// ── API KEY ────────────────────────────────────────────────────
+function getKey() { return localStorage.getItem('sen_apikey') || ''; }
+function saveKey() {
+  const v = document.getElementById('api-input').value.trim();
+  if (!v.startsWith('sk-')) { alert('Ключ должен начинаться с sk-ant-...'); return; }
+  localStorage.setItem('sen_apikey', v);
+  updateApiStatus();
+  closeModal();
+}
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+function updateApiStatus() {
+  const k = getKey();
+  const dot = document.getElementById('api-dot');
+  const txt = document.getElementById('api-status-text');
+  if (k) { dot.className = 'api-dot ok'; txt.textContent = 'API подключён'; }
+  else { dot.className = 'api-dot'; txt.textContent = 'API-ключ не задан'; }
+}
+
+// ── NAVIGATION ──────────────────────────────────────────────────
+function showPage(name, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  el.classList.add('active');
+}
+
+// ── REVENUE ────────────────────────────────────────────────────
+function initRevenues() {
+  const c = document.getElementById('rev-rows'); c.innerHTML = '';
+  YEARS.forEach(y => {
+    const d = REV_DEFAULTS[y] || {};
+    const row = document.createElement('div'); row.className = 'rev-grid';
+    row.innerHTML = `<div class="rev-year">${y}</div><input id="rev_${y}" value="${d.rev||''}" placeholder="0"><input id="profit_${y}" value="${d.profit||''}" placeholder="0">`;
+    c.appendChild(row);
+  });
+}
+
+// ── SRO ────────────────────────────────────────────────────────
+function addSROFilled(data) {
+  sroCount++;
+  const id = sroCount;
+  const el = document.createElement('div');
+  el.className = 'sro-item filled'; el.id = `si-${id}`;
+  el.innerHTML = `<div class="sro-hdr"><span class="sro-name">${data.type}</span><button class="rm-btn" onclick="document.getElementById('si-${id}').remove();updSROBadge()">Удалить</button></div>
+  <div class="grid2">
+    <div class="field full"><label>Наименование СРО</label><input id="sn_${id}" value="${data.name}"></div>
+    <div class="field"><label>Рег. номер в гос. реестре СРО</label><input id="sreg_${id}" value="${data.regSRO}"></div>
+    <div class="field"><label>Рег. номер члена</label><input id="smem_${id}" value="${data.member}"></div>
+    <div class="field"><label>Дата вступления</label><input id="sd_${id}" value="${data.since}"></div>
+    <div class="field full"><label>Уровень ответственности</label><input id="slev_${id}" value="${data.level}"></div>
+    <div class="field full"><label>Виды работ</label><input id="sw_${id}" value="${data.works}"></div>
+  </div>`;
+  document.getElementById('sro-list').appendChild(el);
+  updSROBadge();
+}
+
+function addSRO() {
+  sroCount++;
+  const id = sroCount;
+  const el = document.createElement('div');
+  el.className = 'sro-item'; el.id = `si-${id}`;
+  el.innerHTML = `<div class="sro-hdr"><span class="sro-name">Новая запись</span><button class="rm-btn" onclick="document.getElementById('si-${id}').remove();updSROBadge()">Удалить</button></div>
+  <div class="grid2">
+    <div class="field full"><label>Тип</label><select id="styp_${id}"><option>СРО на строительство</option><option>СРО на проектирование</option><option>СРО на инженерные изыскания</option><option>Лицензия ФСБ</option><option>Лицензия МЧС</option><option>Другое</option></select></div>
+    <div class="field full"><label>Наименование СРО</label><input id="sn_${id}" placeholder="Наименование"></div>
+    <div class="field"><label>Рег. номер гос. реестра</label><input id="sreg_${id}" placeholder="СРО-С-000-00000000"></div>
+    <div class="field"><label>Рег. номер члена</label><input id="smem_${id}" placeholder="000000/000"></div>
+    <div class="field"><label>Дата вступления</label><input id="sd_${id}" type="date"></div>
+    <div class="field full"><label>Уровень ответственности</label><input id="slev_${id}" placeholder="Первый уровень..."></div>
+    <div class="field full"><label>Виды работ</label><input id="sw_${id}" placeholder="Строительство, реконструкция..."></div>
+  </div>`;
+  document.getElementById('sro-list').appendChild(el);
+  updSROBadge();
+}
+
+function updSROBadge() {
+  const n = document.querySelectorAll('[id^="si-"]').length;
+  document.getElementById('sro-cnt').textContent = n;
+}
+
+function getSROText() {
+  const items = [];
+  document.querySelectorAll('[id^="si-"]').forEach(el => {
+    const id = el.id.replace('si-', '');
+    const type = el.querySelector('.sro-name')?.textContent || g(`styp_${id}`) || 'СРО';
+    items.push(`${type}: ${g(`sn_${id}`)}, рег. реестра: ${g(`sreg_${id}`)}, рег. члена: ${g(`smem_${id}`)}, с ${g(`sd_${id}`)}, уровень: ${g(`slev_${id}`)}`);
+  });
+  return items.length ? items.join('\n') : 'Не указано';
+}
+
+// ── EXPERIENCE ─────────────────────────────────────────────────
+const ALL_EXP = [
+  ...SK.map(r => ({ ...r, cat: r.s === 'Технический заказчик' ? 'tz' : 'sk', year: r.y1 })),
+  ...OBS.map(r => ({ c: r.c, o: r.o, s: r.t, r: r.r, sum: r.sum, cat: 'obs', year: r.y, y1: r.y, y2: null }))
+].sort((a, b) => b.year - a.year);
+
+function initExpYears() {
+  const ys = [...new Set(ALL_EXP.map(r => r.year).filter(Boolean))].sort((a,b)=>b-a);
+  const sel = document.getElementById('exp-year');
+  ys.forEach(y => { const o = document.createElement('option'); o.value=y; o.textContent=y; sel.appendChild(o); });
+}
+
+function renderExp() {
+  const q = (document.getElementById('exp-search').value || '').toLowerCase();
+  const ty = document.getElementById('exp-type').value;
+  const yr = document.getElementById('exp-year').value;
+  let data = ALL_EXP.filter(r => {
+    if (q && ![r.c, r.o, r.r].join(' ').toLowerCase().includes(q)) return false;
+    if (ty && r.cat !== ty) return false;
+    if (yr && String(r.year) !== yr) return false;
+    return true;
+  });
+  document.getElementById('exp-count').textContent = `Найдено: ${data.length}`;
+  const total = Math.ceil(data.length / EXP_PAGE) || 1;
+  if (expPage > total) expPage = 1;
+  const slice = data.slice((expPage - 1) * EXP_PAGE, expPage * EXP_PAGE);
+  const tagMap = { sk: '<span class="tag tag-sk">Стр. контроль</span>', tz: '<span class="tag tag-tz">Техзаказчик</span>', obs: '<span class="tag tag-obs">Обследование</span>' };
+  let html = '';
+  slice.forEach((r, i) => {
+    const n = (expPage - 1) * EXP_PAGE + i + 1;
+    const period = r.y2 ? `${r.y1}–${r.y2}` : r.y1 + (r.y2 === null && r.cat !== 'obs' ? '–н.в.' : '');
+    html += `<tr><td style="color:var(--text3)">${n}</td><td>${r.c}</td><td>${r.o}</td><td>${tagMap[r.cat]||''}</td><td>${r.r||'—'}</td><td>${period}</td><td style="white-space:nowrap">${r.sum ? r.sum.toLocaleString('ru-RU') : '—'}</td></tr>`;
+  });
+  document.getElementById('exp-tbody').innerHTML = html || '<tr><td colspan="7" style="color:var(--text3);padding:20px;text-align:center">Нет результатов</td></tr>';
+  renderExpPag(total);
+}
+
+function renderExpPag(total) {
+  const el = document.getElementById('exp-pag');
+  if (total <= 1) { el.innerHTML = ''; return; }
+  let html = `<button onclick="expPage=Math.max(1,expPage-1);renderExp()" ${expPage===1?'disabled':''}>‹</button>`;
+  const s = Math.max(1, expPage-2), e = Math.min(total, expPage+2);
+  if (s>1) html += `<button onclick="expPage=1;renderExp()">1</button>${s>2?'<span class="pi">…</span>':''}`;
+  for (let p=s;p<=e;p++) html += `<button class="${p===expPage?'active':''}" onclick="expPage=${p};renderExp()">${p}</button>`;
+  if (e<total) html += `${e<total-1?'<span class="pi">…</span>':''}<button onclick="expPage=${total};renderExp()">${total}</button>`;
+  html += `<button onclick="expPage=Math.min(${total},expPage+1);renderExp()" ${expPage===total?'disabled':''}>›</button>`;
+  html += `<span class="pi">${expPage} / ${total}</span>`;
+  el.innerHTML = html;
+}
+
+// ── DB ─────────────────────────────────────────────────────────
+function g(id) { const e = document.getElementById(id); return e ? e.value.trim() : ''; }
+
+function getDB() {
+  const sros = [];
+  document.querySelectorAll('[id^="si-"]').forEach(el => {
+    const id = el.id.replace('si-','');
+    sros.push({ type: el.querySelector('.sro-name')?.textContent || g(`styp_${id}`), name: g(`sn_${id}`), regSRO: g(`sreg_${id}`), member: g(`smem_${id}`), since: g(`sd_${id}`), level: g(`slev_${id}`), works: g(`sw_${id}`) });
+  });
+  const revs = {};
+  YEARS.forEach(y => { revs[y] = { rev: g(`rev_${y}`), profit: g(`profit_${y}`) }; });
+  return { fullname:g('fullname'),shortname:g('shortname'),inn:g('inn'),kpp:g('kpp'),ogrn:g('ogrn'),okpo:g('okpo'),okato:g('okato'),okved:g('okved'),okfs:g('okfs'),okopf:g('okopf'),regdate:g('regdate'),capital:g('capital'),addr:g('addr'),addr2:g('addr2'),bank:g('bank'),rs:g('rs'),ks:g('ks'),bik:g('bik'),phone:g('phone'),email:g('email'),site:g('site'),nalog:g('nalog'),tax:g('tax'),msp:g('msp'),pfr:g('pfr'),fss:g('fss'),ceo:g('ceo'),ceo_pos:g('ceo_pos'),ceo_basis:g('ceo_basis'),ceo_inn:g('ceo_inn'),cfo:g('cfo'),cfo_pos:g('cfo_pos'),staff:g('staff'),managers:g('managers'),itr:g('itr'),desc:g('desc'),revs,sros };
+}
+
+function saveDB() {
+  try { localStorage.setItem('sen_db4', JSON.stringify(getDB())); showSt('db-status','ok','✓ База сохранена в браузере'); }
+  catch(e) { showSt('db-status','err','Ошибка: '+e.message); }
+}
+function loadDB() {
+  try {
+    const d = JSON.parse(localStorage.getItem('sen_db4')||'{}');
+    if (!d.inn) { showSt('db-status','warn','Нет сохранённых данных'); return; }
+    ['fullname','shortname','inn','kpp','ogrn','okpo','okato','okved','okfs','okopf','regdate','capital','addr','addr2','bank','rs','ks','bik','phone','email','site','nalog','tax','msp','pfr','fss','ceo','ceo_pos','ceo_basis','ceo_inn','cfo','cfo_pos','staff','managers','itr','desc'].forEach(f => { if(document.getElementById(f)&&d[f]) document.getElementById(f).value=d[f]; });
+    showSt('db-status','ok','✓ Данные загружены');
+  } catch(e) { showSt('db-status','err','Ошибка: '+e.message); }
+}
+
+function showSt(id, type, msg) {
+  document.getElementById(id).innerHTML = `<div class="status ${type}">${msg}</div>`;
+  setTimeout(() => { const e=document.getElementById(id); if(e) e.innerHTML=''; }, 3500);
+}
+
+// ── AI FILL ────────────────────────────────────────────────────
+function buildSystemPrompt() {
+  const db = getDB();
+  const revText = YEARS.map(y=>`${y}: выручка ${db.revs[y]?.rev||'—'} руб., чистая прибыль ${db.revs[y]?.profit||'—'} руб.`).join('\n');
+  const sroText = db.sros.length ? db.sros.map((s,i)=>`${i+1}. ${s.type}: ${s.name}, рег. реестра: ${s.regSRO}, рег. члена: ${s.member}, с ${s.since}, уровень: ${s.level}`).join('\n') : 'Не указано';
+  const exp3 = SK.filter(r=>r.y1>=2023).slice(0,5).map((r,i)=>`${i+1}. Заказчик: ${r.c}, Объект: ${r.o}, Регион: ${r.r}, Период: ${r.y1}–${r.y2||'н.в.'}, Сумма: ${(r.sum||0).toLocaleString('ru-RU')} руб.`).join('\n');
+  return `Ты — помощник для заполнения конкурсных анкет строительной компании.
+Заполни каждое поле анкеты данными из базы. Сохраняй структуру и нумерацию оригинала. Если данных нет — ставь [ТРЕБУЕТ УТОЧНЕНИЯ]. Только заполненная анкета, без комментариев.
+
+БАЗА ДАННЫХ:
+Полное наименование: ${db.fullname}
+Краткое наименование: ${db.shortname}
+Организационно-правовая форма: Общество с ограниченной ответственностью
+ИНН: ${db.inn} | КПП: ${db.kpp} | ОГРН: ${db.ogrn}
+ОКПО: ${db.okpo} | ОКАТО: ${db.okato} | ОКВЭД: ${db.okved}
+ОКФС: ${db.okfs} | ОКОПФ: ${db.okopf}
+Дата регистрации: ${db.regdate}
+Уставный капитал: ${db.capital} руб.
+Юридический адрес: ${db.addr}
+Фактический адрес: ${db.addr2}
+Банк: ${db.bank}
+Расчётный счёт: ${db.rs} | Корр. счёт: ${db.ks} | БИК: ${db.bik}
+Телефон: ${db.phone} | Email: ${db.email} | Сайт: ${db.site}
+Налоговый орган: ${db.nalog}
+Система налогообложения: ${db.tax}
+Категория МСП: ${db.msp}
+Рег. номер ПФР: ${db.pfr} | Рег. номер ФСС: ${db.fss}
+Генеральный директор: ${db.ceo}, ${db.ceo_pos}, основание: ${db.ceo_basis}, ИНН: ${db.ceo_inn}
+Главный бухгалтер: ${db.cfo}, ${db.cfo_pos}
+Среднесписочная численность: ${db.staff} чел. (руководители: ${db.managers}, ИТР: ${db.itr})
+Описание деятельности: ${db.desc}
+
+ФИНАНСЫ:
+${revText}
+
+СРО И ДОПУСКИ:
+${sroText}
+
+ОПЫТ (последние 3 года, строительный контроль):
+${exp3}`;
+}
+
+async function fillWithAI() {
+  const key = getKey();
+  if (!key) { document.getElementById('modal').style.display='flex'; return; }
+
+  // Determine text source
+  let q = '';
+  if (currentSource === 'file') {
+    q = extractedText;
+    if (!q) { showSt('ai-status','warn','Загрузите файл анкеты или переключитесь на ввод текста'); return; }
+  } else {
+    q = g('questionnaire');
+    if (!q) { showSt('ai-status','warn','Вставьте текст анкеты заказчика'); return; }
+  }
+
+  const btn = document.getElementById('ai-btn');
+  btn.disabled = true; btn.textContent = 'Заполняю...';
+  document.getElementById('ai-status').innerHTML = '<div class="status loading">ИИ анализирует анкету...</div>';
+  document.getElementById('result-section').style.display = 'none';
+  document.getElementById('score-row').style.display = 'none';
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:2000, system:buildSystemPrompt(), messages:[{role:'user',content:`Заполни анкету:\n\n${q}`}] })
+    });
+    const data = await resp.json();
+    const text = data.content?.find(b=>b.type==='text')?.text || '';
+    if (text) {
+      document.getElementById('result-text').value = text;
+      document.getElementById('result-section').style.display = 'block';
+      const blanks = (q.match(/_{3,}/g)||[]).length;
+      const unclear = (text.match(/\[ТРЕБУЕТ УТОЧНЕНИЯ\]/g)||[]).length;
+      const filled = blanks - unclear;
+      const pct = blanks ? Math.round(filled/blanks*100) : 0;
+      document.getElementById('sc-filled').textContent = `${filled} (${pct}%)`;
+      document.getElementById('sc-unclear').textContent = unclear;
+      document.getElementById('sc-total').textContent = blanks;
+      document.getElementById('score-row').style.display = 'grid';
+      showSt('ai-status','ok',`✓ Готово! Заполнено ${filled} из ${blanks} полей (${pct}%)`);
+    } else {
+      showSt('ai-status','err','Ошибка: '+(data.error?.message||JSON.stringify(data)));
+    }
+  } catch(e) { showSt('ai-status','err','Ошибка соединения: '+e.message); }
+  btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+}
+
+function copyResult() {
+  const ta = document.getElementById('result-text'); ta.select(); document.execCommand('copy');
+  event.target.textContent='Скопировано!'; setTimeout(()=>event.target.textContent='Копировать',2000);
+}
+function clearFill() {
+  extractedText = '';
+  document.getElementById('file-badge-wrap').style.display = 'none';
+  document.getElementById('extract-status').innerHTML = '';
+  const input = document.querySelector('#upload-zone input[type=file]');
+  if (input) input.value = '';
+  document.getElementById('questionnaire').value='';
+  document.getElementById('result-section').style.display='none';
+  document.getElementById('ai-status').innerHTML='';
+  document.getElementById('score-row').style.display='none';
+}
+
+// ── FILE UPLOAD ────────────────────────────────────────────────
+let extractedText = '';
+let currentSource = 'file';
+
+function switchSource(src) {
+  currentSource = src;
+  document.getElementById('source-file').style.display = src === 'file' ? 'block' : 'none';
+  document.getElementById('source-text').style.display = src === 'text' ? 'block' : 'none';
+  document.getElementById('tab-file-btn').classList.toggle('active', src === 'file');
+  document.getElementById('tab-text-btn').classList.toggle('active', src === 'text');
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('upload-zone').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+}
+
+function handleFileInput(input) {
+  const file = input.files[0];
+  if (file) processFile(file);
+}
+
+async function processFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  showExtractStatus('loading', `Читаю файл «${file.name}»...`);
+  document.getElementById('file-badge-wrap').style.display = 'none';
+  extractedText = '';
+
+  try {
+    if (ext === 'docx' || ext === 'doc') {
+      await extractDocx(file);
+    } else if (ext === 'pdf') {
+      await extractPdf(file);
+    } else if (ext === 'txt') {
+      extractedText = await file.text();
+      onExtractDone(file.name, extractedText.length);
+    } else {
+      showExtractStatus('err', 'Неподдерживаемый формат. Используйте DOCX, PDF или TXT.');
+      return;
+    }
+  } catch (err) {
+    showExtractStatus('err', 'Ошибка чтения файла: ' + err.message);
+  }
+}
+
+async function extractDocx(file) {
+  if (typeof mammoth === 'undefined') {
+    showExtractStatus('err', 'Библиотека mammoth.js не загрузилась. Проверьте интернет-соединение.');
+    return;
+  }
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  extractedText = result.value;
+  onExtractDone(file.name, extractedText.length);
+}
+
+async function extractPdf(file) {
+  if (typeof pdfjsLib === 'undefined') {
+    showExtractStatus('err', 'Библиотека PDF.js не загрузилась. Проверьте интернет-соединение.');
+    return;
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let text = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(item => item.str).join(' ');
+    text += pageText + '\n';
+  }
+  extractedText = text;
+  onExtractDone(file.name, extractedText.length);
+}
+
+function onExtractDone(fileName, chars) {
+  document.getElementById('file-name-badge').textContent = `📄 ${fileName} (${chars.toLocaleString('ru-RU')} симв.)`;
+  document.getElementById('file-badge-wrap').style.display = 'block';
+  showExtractStatus('ok', `✓ Файл успешно прочитан. Нажмите «Заполнить с помощью ИИ»`);
+}
+
+function removeFile() {
+  extractedText = '';
+  document.getElementById('file-badge-wrap').style.display = 'none';
+  document.getElementById('extract-status').innerHTML = '';
+  // Reset file input
+  const zone = document.getElementById('upload-zone');
+  const input = zone.querySelector('input[type=file]');
+  input.value = '';
+}
+
+function showExtractStatus(type, msg) {
+  document.getElementById('extract-status').innerHTML = `<div class="status ${type}">${msg}</div>`;
+}
+
+// ── INIT ───────────────────────────────────────────────────────
+initRevenues();
+SRO_DATA.forEach(d => addSROFilled(d));
+initExpYears();
+renderExp();
+updateApiStatus();
+if (!getKey()) setTimeout(()=>document.getElementById('modal').style.display='flex', 800);
+</script>
+</body>
+</html>
