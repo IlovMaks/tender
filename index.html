@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
   --bg: #f5f4f0;
@@ -396,10 +397,10 @@ tr:hover td { background: var(--surface2); }
              ondragover="event.preventDefault();this.classList.add('drag-over')"
              ondragleave="this.classList.remove('drag-over')"
              ondrop="handleDrop(event)">
-          <input type="file" accept=".docx,.doc,.pdf,.txt" onchange="handleFileInput(this)">
+          <input type="file" accept=".docx,.doc,.pdf,.txt,.xlsx,.xls" onchange="handleFileInput(this)">
           <div class="uz-icon">📄</div>
           <div class="uz-title">Перетащите файл или нажмите для выбора</div>
-          <div class="uz-sub">Поддерживаются форматы: DOCX, PDF, TXT</div>
+          <div class="uz-sub">Поддерживаются форматы: DOCX, PDF, XLSX, XLS, TXT</div>
         </div>
         <div id="file-badge-wrap" style="display:none">
           <div class="file-badge">
@@ -855,11 +856,13 @@ async function processFile(file) {
       await extractDocx(file);
     } else if (ext === 'pdf') {
       await extractPdf(file);
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      await extractXlsx(file);
     } else if (ext === 'txt') {
       extractedText = await file.text();
       onExtractDone(file.name, extractedText.length);
     } else {
-      showExtractStatus('err', 'Неподдерживаемый формат. Используйте DOCX, PDF или TXT.');
+      showExtractStatus('err', 'Неподдерживаемый формат. Используйте DOCX, PDF, XLSX, XLS или TXT.');
       return;
     }
   } catch (err) {
@@ -875,6 +878,33 @@ async function extractDocx(file) {
   const arrayBuffer = await file.arrayBuffer();
   const result = await mammoth.extractRawText({ arrayBuffer });
   extractedText = result.value;
+  onExtractDone(file.name, extractedText.length);
+}
+
+async function extractXlsx(file) {
+  if (typeof XLSX === 'undefined') {
+    showExtractStatus('err', 'Библиотека SheetJS не загрузилась. Проверьте интернет-соединение.');
+    return;
+  }
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  let text = '';
+  workbook.SheetNames.forEach(sheetName => {
+    const sheet = workbook.Sheets[sheetName];
+    // Convert sheet to array of arrays for readable output
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (rows.length === 0) return;
+    text += `[Лист: ${sheetName}]\n`;
+    rows.forEach(row => {
+      // Filter out completely empty rows
+      const cells = row.map(c => (c === null || c === undefined) ? '' : String(c).trim());
+      if (cells.some(c => c !== '')) {
+        text += cells.join('\t') + '\n';
+      }
+    });
+    text += '\n';
+  });
+  extractedText = text;
   onExtractDone(file.name, extractedText.length);
 }
 
