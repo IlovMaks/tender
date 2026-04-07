@@ -775,7 +775,14 @@ async function fillWithAI() {
         'X-Title': 'Stroyexpertnadzor Tender Assistant'
       },
       body: JSON.stringify({
-        model: 'deepseek/deepseek-chat-v3.1:free',
+        model: 'meta-llama/llama-3.3-70b-instruct:free',
+        models: [
+          'meta-llama/llama-3.3-70b-instruct:free',
+          'qwen/qwen3-235b-a22b:free',
+          'mistralai/mistral-small-3.1-24b-instruct:free',
+          'openrouter/free'
+        ],
+        route: 'fallback',
         max_tokens: 2000,
         messages: [
           { role: 'system', content: buildSystemPrompt() },
