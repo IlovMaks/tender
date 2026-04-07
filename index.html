@@ -794,7 +794,7 @@ async function fillWithAI() {
         'X-Title': 'Stroyexpertnadzor Tender Assistant'
       },
       body: JSON.stringify({
-        model: 'qwen/qwen3-235b-a22b:free',
+        model: 'openrouter/auto',
         max_tokens: 2000,
         messages: [
           { role: 'system', content: buildSystemPrompt() },
