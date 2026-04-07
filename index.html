@@ -794,7 +794,7 @@ async function fillWithAI() {
         'X-Title': 'Stroyexpertnadzor Tender Assistant'
       },
       body: JSON.stringify({
-        model: 'meta-llama/llama-3.3-70b-instruct:free',
+        model: 'qwen/qwen3-235b-a22b:free',
         max_tokens: 2000,
         messages: [
           { role: 'system', content: buildSystemPrompt() },
