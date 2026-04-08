@@ -1,4 +1,4 @@
-с<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -797,11 +797,35 @@ async function fillWithAI() {
   document.getElementById('score-row').style.display = 'none';
   filledFileBlob = null;
 
-  // Build prompt: if file mode — ask for JSON pairs; if text mode — ask for filled text
+  // Build prompt: if file mode — ask for JSON with cell coords; if text mode — filled text
   const systemPrompt = buildSystemPrompt();
-  const userPrompt = isFile
-    ? `Проанализируй анкету заказчика и верни ТОЛЬКО валидный JSON объект (без пояснений, без markdown, без \`\`\`), где ключи — это названия полей/вопросов из анкеты, а значения — данные из базы компании. Если данных нет — значение "[ТРЕБУЕТ УТОЧНЕНИЯ]". Пример: {"Полное наименование": "ООО ...", "ИНН": "7736557940"}\n\nАНКЕТА:\n${q}`
-    : `Заполни анкету данными из базы. Сохраняй структуру. Если данных нет — [ТРЕБУЕТ УТОЧНЕНИЯ].\n\nАНКЕТА:\n${q}`;
+  const isXlsx = isFile && (currentFileExt === 'xlsx' || currentFileExt === 'xls');
+  const isDocx = isFile && currentFileExt === 'docx';
+
+  let userPrompt;
+  if (isXlsx) {
+    userPrompt = `Перед тобой структура Excel-анкеты заказчика. Каждая строка содержит ячейки в формате АДРЕС:ЗНАЧЕНИЕ.
+Ячейки с [ПУСТО] — это поля для заполнения.
+
+ЗАДАЧА: Верни ТОЛЬКО валидный JSON (без markdown, без \`\`\`, без пояснений), где:
+- ключи = точные адреса ячеек Excel (например "D4", "E9", "C15")  
+- значения = данные из базы компании, которые подходят к соседним меткам
+
+Правила:
+1. Заполняй ТОЛЬКО ячейки помеченные [ПУСТО]
+2. Смотри на соседние ячейки в той же строке/столбце чтобы понять что за поле
+3. Если данных нет — пропусти ячейку (не включай в JSON)
+4. Не трогай ячейки с существующими значениями
+
+Пример ответа: {"D4": "ООО Стройэкспертнадзор", "D5": "119415, г. Москва...", "D8": "Топчиев Владимир Иванович"}
+
+АНКЕТА:
+${q}`;
+  } else if (isDocx) {
+    userPrompt = `Проанализируй анкету и верни ТОЛЬКО валидный JSON (без markdown, без \`\`\`), где ключи — названия полей, значения — данные из базы. Если данных нет — "[ТРЕБУЕТ УТОЧНЕНИЯ]".\n\nАНКЕТА:\n${q}`;
+  } else {
+    userPrompt = `Заполни анкету данными из базы. Сохраняй структуру. Если данных нет — [ТРЕБУЕТ УТОЧНЕНИЯ].\n\nАНКЕТА:\n${q}`;
+  }
 
   try {
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -983,19 +1007,40 @@ async function extractDocx(file) {
 
 async function extractXlsx(file) {
   const arrayBuffer = await file.arrayBuffer();
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  const workbook = XLSX.read(arrayBuffer, { type: 'array', cellStyles: true, sheetStubs: true });
   let text = '';
+
   workbook.SheetNames.forEach(sheetName => {
     const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    if (rows.length === 0) return;
+    if (!sheet['!ref']) return;
+    const range = XLSX.utils.decode_range(sheet['!ref']);
     text += `[Лист: ${sheetName}]\n`;
-    rows.forEach(row => {
-      const cells = row.map(c => (c === null || c === undefined) ? '' : String(c).trim());
-      if (cells.some(c => c !== '')) text += cells.join('\t') + '\n';
-    });
+    text += `Каждая строка: АДРЕС:ЗНАЧЕНИЕ через | (пустые = [ПУСТО])\n\n`;
+
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      const rowParts = [];
+      let hasContent = false;
+
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: C });
+        const cell = sheet[addr];
+        const val = (cell && cell.v !== undefined && cell.v !== null && String(cell.v).trim() !== '')
+          ? String(cell.v).replace(/\n/g, ' ').trim()
+          : '';
+        if (val) hasContent = true;
+        rowParts.push(`${addr}:${val || '[ПУСТО]'}`);
+      }
+
+      if (hasContent) {
+        // Trim trailing empty cells
+        let last = rowParts.length - 1;
+        while (last > 0 && rowParts[last].endsWith(':[ПУСТО]')) last--;
+        text += rowParts.slice(0, last + 1).join(' | ') + '\n';
+      }
+    }
     text += '\n';
   });
+
   extractedText = text;
   onExtractDone(file.name, extractedText.length);
 }
@@ -1020,102 +1065,59 @@ function showExtractStatus(type, msg) {
 
 // ── PRODUCE FILLED FILE ───────────────────────────────────────
 async function produceFilledDocx(pairs) {
-  // Load original docx as zip
   const arrayBuffer = await currentFile.arrayBuffer();
   const zip = await JSZip.loadAsync(arrayBuffer);
   let xml = await zip.file('word/document.xml').async('string');
 
-  // Replace blanks: ___ sequences and empty table cells after labels
-  // Strategy: for each pair {label, value}, find the label in XML and fill the nearest blank
-  for (const [label, value] of Object.entries(pairs)) {
-    if (!value || value === '[ТРЕБУЕТ УТОЧНЕНИЯ]') continue;
-    const safeVal = value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    // Replace underscores pattern near this label
-    const underscoreRe = /_{3,}/g;
-    xml = xml.replace(underscoreRe, (match, offset) => {
-      // Check if label text appears within 2000 chars before this match
-      const before = xml.substring(Math.max(0, offset - 2000), offset);
-      const plainBefore = before.replace(/<[^>]+>/g, '');
-      if (plainBefore.includes(label.substring(0, Math.min(label.length, 20)))) {
-        return safeVal;
-      }
-      return match;
-    });
-  }
-
-  // Fallback: replace remaining ___ sequences in order with remaining values
-  const remainingValues = Object.entries(pairs)
-    .filter(([,v]) => v && v !== '[ТРЕБУЕТ УТОЧНЕНИЯ]')
-    .map(([,v]) => v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'));
+  // Replace underscores sequences with values in order
+  const values = Object.values(pairs).filter(v => v && v !== '[ТРЕБУЕТ УТОЧНЕНИЯ]');
   let vi = 0;
   xml = xml.replace(/_{3,}/g, () => {
-    if (vi < remainingValues.length) return remainingValues[vi++];
+    if (vi < values.length) {
+      const v = values[vi++];
+      return v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
     return '___';
   });
 
   zip.file('word/document.xml', xml);
-  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  const blob = await zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  });
   return blob;
 }
 
-async function produceFilledXlsx(pairs) {
+async function produceFilledXlsx(coordMap) {
+  // coordMap: { "D4": "value", "B9": "value2", ... } — exact cell addresses from AI
   const arrayBuffer = await currentFile.arrayBuffer();
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  const workbook = XLSX.read(arrayBuffer, {
+    type: 'array', cellStyles: true, cellNF: true, sheetStubs: true
+  });
 
   workbook.SheetNames.forEach(sheetName => {
     const sheet = workbook.Sheets[sheetName];
-    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:Z100');
-
-    // Build a map: row -> {labelCol, valueCol} for rows where next col is empty
-    for (let R = range.s.r; R <= range.e.r; R++) {
-      for (let C = range.s.c; C <= range.e.c; C++) {
-        const cellAddr = XLSX.utils.encode_cell({ r: R, c: C });
-        const cell = sheet[cellAddr];
-        if (!cell) continue;
-        const cellVal = String(cell.v || '').trim();
-        if (!cellVal) continue;
-
-        // Check if this cell is empty (blank field) — look for ___ or truly empty
-        const isBlank = /^_{2,}$/.test(cellVal) || cellVal === '' || cellVal === '-';
-
-        // Find matching pair by looking at label in same row or previous cell
-        for (const [label, value] of Object.entries(pairs)) {
-          if (!value || value === '[ТРЕБУЕТ УТОЧНЕНИЯ]') continue;
-          if (isBlank) {
-            // Check cell to the left for matching label
-            if (C > 0) {
-              const leftAddr = XLSX.utils.encode_cell({ r: R, c: C - 1 });
-              const leftCell = sheet[leftAddr];
-              const leftVal = leftCell ? String(leftCell.v || '') : '';
-              if (leftVal.toLowerCase().includes(label.toLowerCase().substring(0, 15))) {
-                sheet[cellAddr] = { t: 's', v: value };
-                delete pairs[label]; // use each value once
-                break;
-              }
-            }
-            // Check cell above
-            if (R > 0) {
-              const aboveAddr = XLSX.utils.encode_cell({ r: R - 1, c: C });
-              const aboveCell = sheet[aboveAddr];
-              const aboveVal = aboveCell ? String(aboveCell.v || '') : '';
-              if (aboveVal.toLowerCase().includes(label.toLowerCase().substring(0, 15))) {
-                sheet[cellAddr] = { t: 's', v: value };
-                delete pairs[label];
-                break;
-              }
-            }
-          }
-          // Replace ___ in cell value
-          if (typeof cell.v === 'string' && /_{2,}/.test(cell.v)) {
-            sheet[cellAddr] = { t: 's', v: cell.v.replace(/_{2,}/g, value) };
-            break;
-          }
-        }
+    for (const [addr, value] of Object.entries(coordMap)) {
+      if (!value || value === '[ТРЕБУЕТ УТОЧНЕНИЯ]' || value === '') continue;
+      // Only write into truly empty or placeholder cells — never overwrite existing data
+      const existing = sheet[addr];
+      const existingVal = existing ? String(existing.v ?? '').trim() : '';
+      if (!existingVal || /^_{2,}$/.test(existingVal) || existingVal === '-') {
+        sheet[addr] = {
+          ...(existing || {}),
+          t: 's',
+          v: String(value),
+          w: String(value)
+        };
       }
     }
   });
 
-  const wbout = XLSX.write(workbook, { bookType: currentFileExt === 'xls' ? 'xls' : 'xlsx', type: 'array' });
+  const wbout = XLSX.write(workbook, {
+    bookType: currentFileExt === 'xls' ? 'xls' : 'xlsx',
+    type: 'array',
+    cellStyles: true
+  });
   const mimeType = currentFileExt === 'xls'
     ? 'application/vnd.ms-excel'
     : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
