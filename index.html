@@ -1045,10 +1045,13 @@ async function extractDocx(file) {
   onExtractDone(file.name, extractedText.length);
 }
 
+let allowedEmptyCells = null; // Set of cell addresses that are safe to fill
+
 async function extractXlsx(file) {
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: 'array', cellStyles: true, sheetStubs: true });
   let text = '';
+  allowedEmptyCells = new Set();
 
   workbook.SheetNames.forEach(sheetName => {
     const sheet = workbook.Sheets[sheetName];
@@ -1068,55 +1071,55 @@ async function extractXlsx(file) {
     }
 
     text += `[Лист: ${sheetName}]\n\n`;
-    text += `СТРУКТУРА АНКЕТЫ (строка за строкой):\n`;
-    text += `Формат: МЕТКА_ЯЧЕЙКА="текст метки" → ОТВЕТ_ЯЧЕЙКА=[ПУСТО или существующее значение]\n\n`;
+    text += `СТРУКТУРА АНКЕТЫ:\n`;
+    text += `Формат строк: АДРЕС="значение" или АДРЕС=[ПУСТО]\n\n`;
 
-    // For each row find label cells and adjacent empty cells
     for (let R = range.s.r; R <= range.e.r; R++) {
       const rowCells = [];
       let hasAny = false;
-
       for (let C = range.s.c; C <= range.e.c; C++) {
         const addr = XLSX.utils.encode_cell({ r: R, c: C });
         const val = cellMap[addr];
-        if (val || C <= 5) { // always show first 6 cols
+        if (val || C <= 5) {
           rowCells.push({ addr, val: val || '' });
           if (val) hasAny = true;
         }
       }
-
       if (!hasAny) continue;
-
-      // Build readable row
+      while (rowCells.length > 0 && !rowCells[rowCells.length-1].val) rowCells.pop();
       const parts = rowCells.map(({ addr, val }) =>
         val ? `${addr}="${val.substring(0, 50)}"` : `${addr}=[ПУСТО]`
       );
       text += parts.join(' | ') + '\n';
     }
 
-    // Explicitly list ALL empty cells that are answer candidates
-    text += `\n--- ПУСТЫЕ ЯЧЕЙКИ (кандидаты для заполнения) ---\n`;
+    // Build whitelist of fillable cells and show them explicitly
+    text += `\n--- РАЗРЕШЁННЫЕ ЯЧЕЙКИ ДЛЯ ЗАПОЛНЕНИЯ ---\n`;
+    text += `(ТОЛЬКО эти адреса допустимы в JSON — никаких других!)\n\n`;
+
     for (let R = range.s.r; R <= range.e.r; R++) {
       for (let C = range.s.c; C <= range.e.c; C++) {
         const addr = XLSX.utils.encode_cell({ r: R, c: C });
-        if (cellMap[addr] !== '') continue; // skip non-empty
+        if (cellMap[addr] !== '') continue; // must be empty
 
-        // Find nearest label in same row (any column to the left)
+        // Find nearest label
         let label = '';
+        // Left in same row
         for (let LC = C - 1; LC >= range.s.c; LC--) {
-          const lAddr = XLSX.utils.encode_cell({ r: R, c: LC });
-          if (cellMap[lAddr]) { label = cellMap[lAddr]; break; }
+          const lv = cellMap[XLSX.utils.encode_cell({ r: R, c: LC })];
+          if (lv) { label = lv; break; }
         }
-        // If no label in row, check row above same column
+        // Above in same column (up to 3 rows)
         if (!label) {
           for (let LR = R - 1; LR >= Math.max(range.s.r, R - 3); LR--) {
-            const aAddr = XLSX.utils.encode_cell({ r: LR, c: C });
-            if (cellMap[aAddr]) { label = cellMap[aAddr]; break; }
+            const av = cellMap[XLSX.utils.encode_cell({ r: LR, c: C })];
+            if (av) { label = av; break; }
           }
         }
 
         if (label) {
-          text += `  ${addr} ← рядом с меткой: "${label.substring(0, 60)}"\n`;
+          allowedEmptyCells.add(addr);
+          text += `  ${addr} → метка: "${label.substring(0, 70)}"\n`;
         }
       }
     }
@@ -1134,6 +1137,7 @@ function onExtractDone(fileName, chars) {
 
 function removeFile() {
   extractedText = ''; currentFile = null; currentFileExt = ''; filledFileBlob = null;
+  allowedEmptyCells = null;
   document.getElementById('file-badge-wrap').style.display = 'none';
   document.getElementById('extract-status').innerHTML = '';
   const input = document.querySelector('#upload-zone input[type=file]');
@@ -1170,7 +1174,6 @@ async function produceFilledDocx(pairs) {
 }
 
 async function produceFilledXlsx(coordMap) {
-  // coordMap: { "D4": "value", "B9": "value2", ... } — exact cell addresses from AI
   const arrayBuffer = await currentFile.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, {
     type: 'array', cellStyles: true, cellNF: true, sheetStubs: true
@@ -1180,17 +1183,27 @@ async function produceFilledXlsx(coordMap) {
     const sheet = workbook.Sheets[sheetName];
     for (const [addr, value] of Object.entries(coordMap)) {
       if (!value || value === '[ТРЕБУЕТ УТОЧНЕНИЯ]' || value === '') continue;
-      // Only write into truly empty or placeholder cells — never overwrite existing data
+
+      // STRICT: only write to cells that were confirmed empty during extraction
+      if (allowedEmptyCells && !allowedEmptyCells.has(addr)) {
+        console.warn(`Skipping ${addr} — not in allowed list`);
+        continue;
+      }
+
+      // Double-check: never overwrite existing non-empty cell
       const existing = sheet[addr];
       const existingVal = existing ? String(existing.v ?? '').trim() : '';
-      if (!existingVal || /^_{2,}$/.test(existingVal) || existingVal === '-') {
-        sheet[addr] = {
-          ...(existing || {}),
-          t: 's',
-          v: String(value),
-          w: String(value)
-        };
+      if (existingVal && !/^_{2,}$/.test(existingVal) && existingVal !== '-') {
+        console.warn(`Skipping ${addr} — already has value: ${existingVal}`);
+        continue;
       }
+
+      sheet[addr] = {
+        ...(existing || {}),
+        t: 's',
+        v: String(value),
+        w: String(value)
+      };
     }
   });
 
