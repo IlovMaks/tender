@@ -804,25 +804,27 @@ async function fillWithAI() {
 
   let userPrompt;
   if (isXlsx) {
-    userPrompt = `Перед тобой структура Excel-анкеты заказчика. Каждая строка содержит ячейки в формате АДРЕС:ЗНАЧЕНИЕ.
-Ячейки с [ПУСТО] — это поля для заполнения.
+    userPrompt = `Ты заполняешь Excel-анкету заказчика данными строительной компании.
 
-ЗАДАЧА: Верни ТОЛЬКО валидный JSON (без markdown, без \`\`\`, без пояснений), где:
-- ключи = точные адреса ячеек Excel (например "D4", "E9", "C15")  
-- значения = данные из базы компании, которые подходят к соседним меткам
+ТВОЯ ЗАДАЧА: Верни ТОЛЬКО валидный JSON объект без markdown, без пояснений, без \`\`\`.
+Ключи JSON = точные адреса ячеек Excel (A1, D4, C17 и т.д.)
+Значения JSON = данные из базы компании подходящие к метке рядом с этой ячейкой.
 
-Правила:
-1. Заполняй ТОЛЬКО ячейки помеченные [ПУСТО]
-2. Смотри на соседние ячейки в той же строке/столбце чтобы понять что за поле
-3. Если данных нет — пропусти ячейку (не включай в JSON)
-4. Не трогай ячейки с существующими значениями
+ПРАВИЛА:
+1. Заполняй ТОЛЬКО пустые ячейки из раздела "ПУСТЫЕ ЯЧЕЙКИ" анкеты
+2. Для каждой пустой ячейки написано рядом с какой меткой она находится — используй это
+3. Если для поля нет данных в базе — НЕ включай эту ячейку в JSON вообще
+4. Никогда не меняй ячейки с уже существующими значениями
+5. Для таблицы объектов (опыт работ) — используй строки ниже заголовков таблицы
+6. Один JSON объект — один ответ. Никакого текста вокруг.
 
-Пример ответа: {"D4": "ООО Стройэкспертнадзор", "D5": "119415, г. Москва...", "D8": "Топчиев Владимир Иванович"}
+ПРИМЕР ПРАВИЛЬНОГО ОТВЕТА:
+{"D4":"ООО «СТРОЙЭКСПЕРТНАДЗОР»","D5":"119415, г. Москва, ул. Удальцова, 23","D8":"Топчиев Владимир Иванович","D13":"197 000","D14":"233 000","D15":"127 274"}
 
-АНКЕТА:
+АНКЕТА ЗАКАЗЧИКА:
 ${q}`;
   } else if (isDocx) {
-    userPrompt = `Проанализируй анкету и верни ТОЛЬКО валидный JSON (без markdown, без \`\`\`), где ключи — названия полей, значения — данные из базы. Если данных нет — "[ТРЕБУЕТ УТОЧНЕНИЯ]".\n\nАНКЕТА:\n${q}`;
+    userPrompt = `Проанализируй анкету и верни ТОЛЬКО валидный JSON (без markdown, без \`\`\`), где ключи — названия полей, значения — данные из базы. Если данных нет — пропусти поле.\n\nАНКЕТА:\n${q}`;
   } else {
     userPrompt = `Заполни анкету данными из базы. Сохраняй структуру. Если данных нет — [ТРЕБУЕТ УТОЧНЕНИЯ].\n\nАНКЕТА:\n${q}`;
   }
@@ -864,15 +866,54 @@ ${q}`;
     }
 
     if (isFile) {
-      // Parse JSON pairs from AI
       let pairs = {};
-      try {
-        const clean = aiText.replace(/```json|```/g,'').trim();
-        pairs = JSON.parse(clean);
-      } catch(e) {
-        // If JSON failed, fallback to text mode
+      let parseOk = false;
+
+      // Robust JSON extraction — handles text before/after, markdown blocks, etc.
+      const tryParseJSON = (text) => {
+        const attempts = [
+          text,
+          text.replace(/```json\s*/gi,'').replace(/```\s*/g,''),
+          (text.match(/\{[\s\S]*\}/) || [])[0] || ''
+        ];
+        for (const attempt of attempts) {
+          if (!attempt) continue;
+          try { const r = JSON.parse(attempt.trim()); if (r && typeof r === 'object') return r; } catch(e) {}
+        }
+        return null;
+      };
+
+      const parsed = tryParseJSON(aiText);
+      if (parsed && Object.keys(parsed).length > 0) {
+        pairs = parsed;
+        parseOk = true;
+      }
+
+      // For xlsx: validate that keys look like cell addresses (A1, BC12, etc.)
+      // If ИИ returned field names instead of coords — show debug and retry
+      if (isXlsx && parseOk) {
+        const cellRe = /^[A-Z]{1,3}\d+$/;
+        const coordKeys = Object.keys(pairs).filter(k => cellRe.test(k));
+        const nameKeys = Object.keys(pairs).filter(k => !cellRe.test(k));
+
+        if (coordKeys.length === 0 && nameKeys.length > 0) {
+          // AI returned field names — show as text, ask user to try again
+          parseOk = false;
+          showResultText('ИИ вернул названия полей вместо координат ячеек.\n\nЧто получил ИИ:\n' + JSON.stringify(pairs, null, 2), q);
+          showSt('ai-status','warn','Модель не поняла формат. Попробуйте ещё раз — обычно со второй попытки работает.');
+          btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+          return;
+        }
+
+        // Filter only valid cell addresses
+        if (nameKeys.length > 0) {
+          for (const k of nameKeys) delete pairs[k];
+        }
+      }
+
+      if (!parseOk) {
         showResultText(aiText, q);
-        showSt('ai-status','warn','Не удалось разобрать JSON — показан текстовый результат. Скопируйте вручную.');
+        showSt('ai-status','warn','Не удалось разобрать ответ ИИ как JSON. Попробуйте ещё раз.');
         btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
         return;
       }
@@ -893,7 +934,6 @@ ${q}`;
         document.getElementById('sc-unclear').textContent = unclear;
         document.getElementById('sc-total').textContent = total;
         document.getElementById('score-row').style.display = 'grid';
-
         document.getElementById('result-file-info').textContent =
           `${currentFile.name.replace(/\.[^.]+$/,'')} • заполнено ${filled} из ${total} полей`;
         document.getElementById('result-file-section').style.display = 'block';
@@ -1014,31 +1054,72 @@ async function extractXlsx(file) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet['!ref']) return;
     const range = XLSX.utils.decode_range(sheet['!ref']);
-    text += `[Лист: ${sheetName}]\n`;
-    text += `Каждая строка: АДРЕС:ЗНАЧЕНИЕ через | (пустые = [ПУСТО])\n\n`;
 
+    // Build full cell value map
+    const cellMap = {};
     for (let R = range.s.r; R <= range.e.r; R++) {
-      const rowParts = [];
-      let hasContent = false;
-
       for (let C = range.s.c; C <= range.e.c; C++) {
         const addr = XLSX.utils.encode_cell({ r: R, c: C });
         const cell = sheet[addr];
-        const val = (cell && cell.v !== undefined && cell.v !== null && String(cell.v).trim() !== '')
+        cellMap[addr] = (cell && cell.v !== undefined && cell.v !== null && String(cell.v).trim() !== '')
           ? String(cell.v).replace(/\n/g, ' ').trim()
           : '';
-        if (val) hasContent = true;
-        rowParts.push(`${addr}:${val || '[ПУСТО]'}`);
-      }
-
-      if (hasContent) {
-        // Trim trailing empty cells
-        let last = rowParts.length - 1;
-        while (last > 0 && rowParts[last].endsWith(':[ПУСТО]')) last--;
-        text += rowParts.slice(0, last + 1).join(' | ') + '\n';
       }
     }
-    text += '\n';
+
+    text += `[Лист: ${sheetName}]\n\n`;
+    text += `СТРУКТУРА АНКЕТЫ (строка за строкой):\n`;
+    text += `Формат: МЕТКА_ЯЧЕЙКА="текст метки" → ОТВЕТ_ЯЧЕЙКА=[ПУСТО или существующее значение]\n\n`;
+
+    // For each row find label cells and adjacent empty cells
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      const rowCells = [];
+      let hasAny = false;
+
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: C });
+        const val = cellMap[addr];
+        if (val || C <= 5) { // always show first 6 cols
+          rowCells.push({ addr, val: val || '' });
+          if (val) hasAny = true;
+        }
+      }
+
+      if (!hasAny) continue;
+
+      // Build readable row
+      const parts = rowCells.map(({ addr, val }) =>
+        val ? `${addr}="${val.substring(0, 50)}"` : `${addr}=[ПУСТО]`
+      );
+      text += parts.join(' | ') + '\n';
+    }
+
+    // Explicitly list ALL empty cells that are answer candidates
+    text += `\n--- ПУСТЫЕ ЯЧЕЙКИ (кандидаты для заполнения) ---\n`;
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: C });
+        if (cellMap[addr] !== '') continue; // skip non-empty
+
+        // Find nearest label in same row (any column to the left)
+        let label = '';
+        for (let LC = C - 1; LC >= range.s.c; LC--) {
+          const lAddr = XLSX.utils.encode_cell({ r: R, c: LC });
+          if (cellMap[lAddr]) { label = cellMap[lAddr]; break; }
+        }
+        // If no label in row, check row above same column
+        if (!label) {
+          for (let LR = R - 1; LR >= Math.max(range.s.r, R - 3); LR--) {
+            const aAddr = XLSX.utils.encode_cell({ r: LR, c: C });
+            if (cellMap[aAddr]) { label = cellMap[aAddr]; break; }
+          }
+        }
+
+        if (label) {
+          text += `  ${addr} ← рядом с меткой: "${label.substring(0, 60)}"\n`;
+        }
+      }
+    }
   });
 
   extractedText = text;
