@@ -182,22 +182,34 @@ tr:hover td { background: var(--surface2); }
 </head>
 <body>
 
-<!-- API KEY MODAL -->
+<!-- SETTINGS MODAL -->
 <div class="modal-bg" id="modal" style="display:none">
   <div class="modal">
-    <h2>🔑 API-ключ OpenRouter</h2>
-    <p>OpenRouter — <strong>бесплатно</strong>, без карты. До 50 запросов в день.<br><br>
-    <strong>Как получить:</strong><br>
-    1. Зайдите на <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a><br>
-    2. Войдите через Google → нажмите <strong>«Create Key»</strong><br>
-    3. Скопируйте ключ целиком и вставьте ниже<br><br>
-    Ключ хранится только в вашем браузере.</p>
-    <input type="password" id="api-input" placeholder="Вставьте ключ сюда...">
+    <h2>⚙ Настройки</h2>
+
+    <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+      <strong>Сервер (для заполнения файлов)</strong><br>
+      URL Python-сервера на Render.com. После деплоя вставьте ваш URL.
+    </p>
+    <input type="text" id="srv-input" placeholder="https://tender-api-xxxx.onrender.com" style="margin-bottom:6px">
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button class="btn primary" onclick="saveSrv()" style="flex:1">Сохранить URL</button>
+      <button class="btn" onclick="testSrv()">Проверить</button>
+    </div>
+    <div id="srv-test-result" style="font-size:12px;margin-bottom:14px"></div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:14px">
+
+    <p style="font-size:13px;color:var(--text2);margin-bottom:8px">
+      <strong>OpenRouter API-ключ</strong> (для текстового режима)<br>
+      Бесплатно на <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>
+    </p>
+    <input type="password" id="api-input" placeholder="sk-or-v1-...">
     <div id="key-preview" style="font-size:11px;color:var(--text3);margin-bottom:10px;font-family:var(--mono);word-break:break-all"></div>
     <div class="modal-row">
-      <button class="btn primary" onclick="saveKey()" style="flex:1">Сохранить и продолжить</button>
+      <button class="btn primary" onclick="saveKey()" style="flex:1">Сохранить ключ</button>
       <button class="btn" onclick="clearKey()">Сбросить</button>
-      <button class="btn" onclick="closeModal()">Отмена</button>
+      <button class="btn" onclick="closeModal()">Закрыть</button>
     </div>
   </div>
 </div>
@@ -216,8 +228,9 @@ tr:hover td { background: var(--surface2); }
     <div class="nav-item" onclick="showPage('exp', this)"><span class="icon">📁</span>Опыт работ <span class="nav-badge">184</span></div>
     <div class="nav-item" onclick="showPage('fill', this)"><span class="icon">✨</span>Заполнить анкету</div>
     <div class="sidebar-footer">
-      <div class="api-status"><span class="api-dot" id="api-dot"></span><span id="api-status-text">API-ключ не задан</span></div>
-      <button class="btn" style="margin-top:8px;width:100%;font-size:11px" onclick="document.getElementById('modal').style.display='flex'">Изменить ключ</button>
+      <div class="api-status"><span class="api-dot" id="api-dot"></span><span id="api-status-text">Ключ не задан</span></div>
+      <div class="api-status" style="margin-top:5px"><span class="api-dot" id="srv-dot"></span><span id="srv-status-text">Сервер не настроен</span></div>
+      <button class="btn" style="margin-top:8px;width:100%;font-size:11px" onclick="document.getElementById('modal').style.display='flex'">⚙ Настройки</button>
     </div>
   </nav>
 
@@ -449,6 +462,11 @@ tr:hover td { background: var(--surface2); }
 </div>
 
 <script>
+// ── CONFIG ─────────────────────────────────────────────────────
+function getApiUrl() {
+  return localStorage.getItem('sen_srv') || '';
+}
+
 // ── DATA ──────────────────────────────────────────────────────
 const YEARS = [2022, 2023, 2024];
 const REV_DEFAULTS = {
@@ -549,7 +567,7 @@ function getKey() { return localStorage.getItem('sen_apikey') || ''; }
 function saveKey() {
   const v = document.getElementById('api-input').value.trim();
   if (!v) { alert('Введите API-ключ'); return; }
-  if (v.length < 20) { alert('Ключ слишком короткий — проверьте что скопировали полностью'); return; }
+  if (v.length < 20) { alert('Ключ слишком короткий'); return; }
   localStorage.setItem('sen_apikey', v);
   updateApiStatus();
   closeModal();
@@ -559,25 +577,52 @@ function clearKey() {
   document.getElementById('api-input').value = '';
   document.getElementById('key-preview').textContent = '';
   updateApiStatus();
-  alert('Ключ удалён. Введите новый ключ.');
 }
-// Show key preview as user types
-document.addEventListener('DOMContentLoaded', () => {
-  const inp = document.getElementById('api-input');
-  if (inp) inp.addEventListener('input', () => {
-    const v = inp.value.trim();
-    const prev = document.getElementById('key-preview');
-    if (v.length > 8) prev.textContent = v.slice(0,8) + '...' + v.slice(-4) + ` (${v.length} симв.)`;
-    else prev.textContent = '';
-  });
-});
+
+function saveSrv() {
+  const v = document.getElementById('srv-input').value.trim().replace(/\/$/, '');
+  if (!v) { alert('Введите URL сервера'); return; }
+  localStorage.setItem('sen_srv', v);
+  updateApiStatus();
+  document.getElementById('srv-test-result').innerHTML =
+    '<span style="color:var(--ok)">✓ URL сохранён. Нажмите «Проверить» для теста.</span>';
+}
+
+async function testSrv() {
+  const url = document.getElementById('srv-input').value.trim().replace(/\/$/, '') ||
+              getApiUrl();
+  if (!url) { alert('Введите URL сервера'); return; }
+  const el = document.getElementById('srv-test-result');
+  el.innerHTML = '<span style="color:var(--text2)">Проверяю...</span>';
+  try {
+    const resp = await fetch(`${url}/health`, { signal: AbortSignal.timeout(10000) });
+    const data = await resp.json();
+    if (data.status === 'ok') {
+      el.innerHTML = `<span style="color:var(--ok)">✓ Сервер работает (v${data.version})</span>`;
+      localStorage.setItem('sen_srv', url);
+      updateApiStatus();
+    } else {
+      el.innerHTML = `<span style="color:var(--danger)">⚠ Неожиданный ответ: ${JSON.stringify(data)}</span>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--danger)">✗ Недоступен: ${e.message}. Проверьте URL или подождите — сервер мог заснуть (30 сек).</span>`;
+  }
+}
+
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
 function updateApiStatus() {
   const k = getKey();
-  const dot = document.getElementById('api-dot');
-  const txt = document.getElementById('api-status-text');
-  if (k) { dot.className = 'api-dot ok'; txt.textContent = 'OpenRouter подключён'; }
-  else { dot.className = 'api-dot'; txt.textContent = 'Ключ не задан'; }
+  document.getElementById('api-dot').className = k ? 'api-dot ok' : 'api-dot';
+  document.getElementById('api-status-text').textContent = k ? 'OpenRouter подключён' : 'Ключ не задан';
+
+  const srv = getApiUrl();
+  document.getElementById('srv-dot').className = srv ? 'api-dot ok' : 'api-dot';
+  document.getElementById('srv-status-text').textContent = srv ? 'Сервер настроен' : 'Сервер не настроен';
+
+  // Pre-fill modal inputs
+  const srvInput = document.getElementById('srv-input');
+  if (srvInput && srv) srvInput.value = srv;
 }
 
 // ── NAVIGATION ──────────────────────────────────────────────────
@@ -777,25 +822,114 @@ ${exp3}`;
 }
 
 async function fillWithAI() {
-  const key = getKey();
-  if (!key) { document.getElementById('modal').style.display='flex'; return; }
-
-  let q = '';
+  const btn = document.getElementById('ai-btn');
   const isFile = currentSource === 'file' && currentFile;
+
+  // FILE MODE → Python API
   if (isFile) {
-    q = extractedText;
-    if (!q) { showSt('ai-status','warn','Загрузите файл анкеты'); return; }
-  } else {
-    q = g('questionnaire');
-    if (!q) { showSt('ai-status','warn','Вставьте текст анкеты заказчика'); return; }
+    if (!extractedText) { showSt('ai-status','warn','Загрузите файл анкеты'); return; }
+
+    // Check if API URL is configured
+    const API_URL = getApiUrl();
+    if (!API_URL) {
+      showSt('ai-status','err','Сервер не настроен. Нажмите «⚙ Настройки» и введите URL сервера.');
+      btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+      return;
+    }
+
+    btn.disabled = true; btn.textContent = 'Отправляю на сервер...';
+    document.getElementById('ai-status').innerHTML = '<div class="status loading">Сервер анализирует файл и заполняет данные...</div>';
+    document.getElementById('result-section').style.display = 'none';
+    document.getElementById('score-row').style.display = 'none';
+    filledFileBlob = null;
+
+    try {
+      const formData = new FormData();
+      formData.append('file', currentFile);
+
+      const resp = await fetch(`${API_URL}/fill`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({error: resp.statusText}));
+        showSt('ai-status','err', `Ошибка сервера: ${err.error || resp.status}`);
+        btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+        return;
+      }
+
+      // Get filename from Content-Disposition header
+      const disposition = resp.headers.get('Content-Disposition') || '';
+      const nameMatch = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]+)/i);
+      const outName = nameMatch ? decodeURIComponent(nameMatch[1]) :
+        currentFile.name.replace(/\.[^.]+$/, '') + '_заполнено.' + currentFileExt;
+
+      filledFileBlob = await resp.blob();
+      filledFileName = outName;
+
+      document.getElementById('result-file-info').textContent =
+        `${currentFile.name} → готов к скачиванию`;
+      document.getElementById('result-file-section').style.display = 'block';
+      document.getElementById('result-text-section').style.display = 'none';
+      document.getElementById('result-section').style.display = 'block';
+      document.getElementById('score-row').style.display = 'none';
+      showSt('ai-status','ok','✓ Готово! Нажмите «Скачать файл»');
+
+    } catch(e) {
+      showSt('ai-status','err','Ошибка соединения с сервером: ' + e.message);
+    }
+
+    btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+    return;
   }
 
-  const btn = document.getElementById('ai-btn');
+  // TEXT MODE → OpenRouter (old logic)
+  const key = getKey();
+  if (!key) { document.getElementById('modal').style.display='flex'; return; }
+  const q = g('questionnaire');
+  if (!q) { showSt('ai-status','warn','Вставьте текст анкеты заказчика'); return; }
+
   btn.disabled = true; btn.textContent = 'Заполняю...';
   document.getElementById('ai-status').innerHTML = '<div class="status loading">ИИ анализирует анкету...</div>';
   document.getElementById('result-section').style.display = 'none';
   document.getElementById('score-row').style.display = 'none';
-  filledFileBlob = null;
+
+  try {
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+        'HTTP-Referer': 'https://ilovmaks.github.io/tender',
+        'X-Title': 'Stroyexpertnadzor Tender Assistant'
+      },
+      body: JSON.stringify({
+        model: 'openrouter/auto',
+        max_tokens: 3000,
+        messages: [
+          { role: 'system', content: buildSystemPrompt() },
+          { role: 'user', content: `Заполни анкету данными из базы. Сохраняй структуру. Если данных нет — [ТРЕБУЕТ УТОЧНЕНИЯ].\n\nАНКЕТА:\n${q}` }
+        ]
+      })
+    });
+    if (!resp.ok) {
+      let errBody = '';
+      try { errBody = JSON.stringify(await resp.json()); } catch(e) { errBody = await resp.text(); }
+      showSt('ai-status','err', `Ошибка ${resp.status}: ${errBody}`);
+      btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+      return;
+    }
+    const data = await resp.json();
+    const aiText = data.choices?.[0]?.message?.content || '';
+    if (aiText) {
+      showResultText(aiText, q);
+    } else {
+      showSt('ai-status','err','Пустой ответ от модели. Попробуйте ещё раз.');
+    }
+  } catch(e) { showSt('ai-status','err','Ошибка соединения: '+e.message); }
+  btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
+}
 
   // Build prompt: if file mode — ask for JSON with cell coords; if text mode — filled text
   const systemPrompt = buildSystemPrompt();
@@ -824,7 +958,21 @@ async function fillWithAI() {
 АНКЕТА ЗАКАЗЧИКА:
 ${q}`;
   } else if (isDocx) {
-    userPrompt = `Проанализируй анкету и верни ТОЛЬКО валидный JSON (без markdown, без \`\`\`), где ключи — названия полей, значения — данные из базы. Если данных нет — пропусти поле.\n\nАНКЕТА:\n${q}`;
+    userPrompt = `Ты заполняешь DOCX-анкету заказчика в виде таблиц. Адреса ячеек: T=таблица, R=строка, C=колонка.
+
+ЗАДАЧА: Верни ТОЛЬКО валидный JSON без markdown и пояснений.
+Ключи = адреса ячеек из списка "РАЗРЕШЁННЫЕ ЯЧЕЙКИ" (формат T2R1C3).
+Значения = данные из базы компании подходящие к метке рядом с ячейкой.
+
+ПРАВИЛА:
+1. Используй ТОЛЬКО адреса из раздела "РАЗРЕШЁННЫЕ ЯЧЕЙКИ ДЛЯ ЗАПОЛНЕНИЯ"
+2. Если для ячейки нет подходящих данных — не включай её в JSON
+3. Никакого текста кроме JSON
+
+ПРИМЕР: {"T2R1C3":"Общество с ограниченной ответственностью «Стройэкспертнадзор»","T2R2C3":"ООО «СТРОЙЭКСПЕРТНАДЗОР»","T2R9C4":"Топчиев Владимир Иванович"}
+
+АНКЕТА:
+${q}`;
   } else {
     userPrompt = `Заполни анкету данными из базы. Сохраняй структуру. Если данных нет — [ТРЕБУЕТ УТОЧНЕНИЯ].\n\nАНКЕТА:\n${q}`;
   }
@@ -889,26 +1037,22 @@ ${q}`;
         parseOk = true;
       }
 
-      // For xlsx: validate that keys look like cell addresses (A1, BC12, etc.)
-      // If ИИ returned field names instead of coords — show debug and retry
-      if (isXlsx && parseOk) {
-        const cellRe = /^[A-Z]{1,3}\d+$/;
-        const coordKeys = Object.keys(pairs).filter(k => cellRe.test(k));
-        const nameKeys = Object.keys(pairs).filter(k => !cellRe.test(k));
+      // Validate coordinate format based on file type
+      if (isXlsx || isDocx) {
+        const xlsxRe = /^[A-Z]{1,3}\d+$/;
+        const docxRe = /^T\d+R\d+C\d+$/;
+        const validRe = isXlsx ? xlsxRe : docxRe;
+        const validKeys = Object.keys(pairs).filter(k => validRe.test(k));
+        const invalidKeys = Object.keys(pairs).filter(k => !validRe.test(k));
 
-        if (coordKeys.length === 0 && nameKeys.length > 0) {
-          // AI returned field names — show as text, ask user to try again
-          parseOk = false;
-          showResultText('ИИ вернул названия полей вместо координат ячеек.\n\nЧто получил ИИ:\n' + JSON.stringify(pairs, null, 2), q);
-          showSt('ai-status','warn','Модель не поняла формат. Попробуйте ещё раз — обычно со второй попытки работает.');
+        if (validKeys.length === 0 && invalidKeys.length > 0) {
+          showResultText('ИИ вернул названия полей вместо координат ячеек.\n\nПолучено:\n' + JSON.stringify(pairs, null, 2), q);
+          showSt('ai-status','warn','Модель не поняла формат координат. Попробуйте ещё раз.');
           btn.disabled=false; btn.textContent='✨ Заполнить с помощью ИИ';
           return;
         }
-
-        // Filter only valid cell addresses
-        if (nameKeys.length > 0) {
-          for (const k of nameKeys) delete pairs[k];
-        }
+        // Remove invalid keys
+        for (const k of invalidKeys) delete pairs[k];
       }
 
       if (!parseOk) {
@@ -1040,12 +1184,147 @@ async function processFile(file) {
 
 async function extractDocx(file) {
   const arrayBuffer = await file.arrayBuffer();
-  const result = await mammoth.extractRawText({ arrayBuffer });
-  extractedText = result.value;
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const xmlStr = await zip.file('word/document.xml').async('string');
+
+  // Parse XML to find table structure
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlStr, 'application/xml');
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+  const tables = doc.getElementsByTagNameNS(W, 'tbl');
+  let text = `СТРУКТУРА DOCX-АНКЕТЫ (таблицы с ячейками)\n`;
+  text += `Пустые ячейки обозначены как [ПУСТО] — только их надо заполнить.\n`;
+  text += `Адрес ячейки: T=таблица, R=строка, C=колонка (нумерация с 1)\n\n`;
+
+  // Also build whitelist
+  allowedEmptyCells = new Set();
+
+  for (let ti = 0; ti < tables.length; ti++) {
+    const rows = tables[ti].getElementsByTagNameNS(W, 'tr');
+    text += `=== Таблица ${ti+1} (${rows.length} строк) ===\n`;
+
+    for (let ri = 0; ri < rows.length; ri++) {
+      const cells = rows[ri].getElementsByTagNameNS(W, 'tc');
+      const cellTexts = [];
+      for (let ci = 0; ci < cells.length; ci++) {
+        const runs = cells[ci].getElementsByTagNameNS(W, 't');
+        let cellText = '';
+        for (let ri2 = 0; ri2 < runs.length; ri2++) cellText += runs[ri2].textContent || '';
+        cellText = cellText.trim();
+        const addr = `T${ti+1}R${ri+1}C${ci+1}`;
+        if (!cellText) {
+          // Find nearest label for context
+          let label = '';
+          // same row, left
+          for (let lc = ci-1; lc >= 0 && !label; lc--) {
+            const lr = cells[lc];
+            if (lr) {
+              const lt = Array.from(lr.getElementsByTagNameNS(W,'t')).map(t=>t.textContent||'').join('').trim();
+              if (lt) label = lt;
+            }
+          }
+          // row above, same col
+          if (!label && ri > 0) {
+            const prevRow = rows[ri-1];
+            const prevCells = prevRow.getElementsByTagNameNS(W, 'tc');
+            if (prevCells[ci]) {
+              const pt = Array.from(prevCells[ci].getElementsByTagNameNS(W,'t')).map(t=>t.textContent||'').join('').trim();
+              if (pt) label = pt;
+            }
+          }
+          if (label) {
+            allowedEmptyCells.add(addr);
+            cellTexts.push(`${addr}=[ПУСТО, метка: "${label.substring(0,40)}"]`);
+          } else {
+            cellTexts.push(`${addr}=[ПУСТО]`);
+          }
+        } else {
+          cellTexts.push(`${addr}="${cellText.substring(0,50)}"`);
+        }
+      }
+      if (cellTexts.some(c => !c.includes('[ПУСТО]') || allowedEmptyCells.has(c.split('=')[0]))) {
+        text += `  ${cellTexts.join(' | ')}\n`;
+      }
+    }
+    text += '\n';
+  }
+
+  text += `\n--- РАЗРЕШЁННЫЕ ЯЧЕЙКИ ДЛЯ ЗАПОЛНЕНИЯ ---\n`;
+  text += `(ТОЛЬКО эти адреса T#R#C# допустимы в JSON!)\n`;
+  for (const addr of [...allowedEmptyCells].sort()) {
+    text += `  ${addr}\n`;
+  }
+
+  extractedText = text;
   onExtractDone(file.name, extractedText.length);
 }
 
-let allowedEmptyCells = null; // Set of cell addresses that are safe to fill
+async function produceFilledDocx(coordMap) {
+  // coordMap: { "T2R1C3": "value", "T2R2C3": "value2" }
+  const arrayBuffer = await currentFile.arrayBuffer();
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const xmlStr = await zip.file('word/document.xml').async('string');
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlStr, 'application/xml');
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+  const tables = doc.getElementsByTagNameNS(W, 'tbl');
+
+  for (const [addr, value] of Object.entries(coordMap)) {
+    if (!value || value === '[ТРЕБУЕТ УТОЧНЕНИЯ]') continue;
+
+    // Only allowed cells
+    if (allowedEmptyCells && !allowedEmptyCells.has(addr)) continue;
+
+    // Parse T#R#C#
+    const m = addr.match(/^T(\d+)R(\d+)C(\d+)$/);
+    if (!m) continue;
+    const [, ti, ri, ci] = m.map(Number);
+
+    const tbl = tables[ti-1];
+    if (!tbl) continue;
+    const rows = tbl.getElementsByTagNameNS(W, 'tr');
+    const row = rows[ri-1];
+    if (!row) continue;
+    const cells = row.getElementsByTagNameNS(W, 'tc');
+    const cell = cells[ci-1];
+    if (!cell) continue;
+
+    // Check cell is actually empty
+    const existingText = Array.from(cell.getElementsByTagNameNS(W,'t')).map(t=>t.textContent||'').join('').trim();
+    if (existingText) continue; // skip non-empty
+
+    // Find existing paragraph to add run into, or create one
+    let para = cell.getElementsByTagNameNS(W, 'p')[0];
+    if (!para) {
+      para = doc.createElementNS(W, 'w:p');
+      cell.appendChild(para);
+    }
+
+    // Remove existing empty runs
+    const existingRuns = para.getElementsByTagNameNS(W, 'r');
+    for (let i = existingRuns.length-1; i >= 0; i--) para.removeChild(existingRuns[i]);
+
+    // Create new run with value
+    const run = doc.createElementNS(W, 'w:r');
+    const t = doc.createElementNS(W, 'w:t');
+    t.textContent = value;
+    t.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve');
+    run.appendChild(t);
+    para.appendChild(run);
+  }
+
+  // Serialize back
+  const serializer = new XMLSerializer();
+  const newXml = serializer.serializeToString(doc);
+  zip.file('word/document.xml', newXml);
+  return await zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  });
+}
 
 async function extractXlsx(file) {
   const arrayBuffer = await file.arrayBuffer();
@@ -1218,11 +1497,12 @@ async function produceFilledXlsx(coordMap) {
   return new Blob([wbout], { type: mimeType });
 }
 
+let filledFileName = '';
+
 function downloadFilledFile() {
   if (!filledFileBlob || !currentFile) return;
-  const ext = currentFileExt;
-  const baseName = currentFile.name.replace(/\.[^.]+$/, '');
-  const outName = `${baseName}_заполнено.${ext}`;
+  const outName = filledFileName ||
+    currentFile.name.replace(/\.[^.]+$/, '') + '_заполнено.' + currentFileExt;
   const url = URL.createObjectURL(filledFileBlob);
   const a = document.createElement('a');
   a.href = url; a.download = outName; a.click();
